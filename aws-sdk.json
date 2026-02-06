@@ -1,0 +1,4 @@
+{
+  "$schema": "../../packages/gen/dist/schema.json",
+  "generate_to": "src/aws/clients"
+}
