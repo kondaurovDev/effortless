@@ -1,9 +1,8 @@
 import { Effect, Console } from "effect";
 import type { ResourceTagMapping } from "@aws-sdk/client-resource-groups-tagging-api";
-import * as lambda from "~/aws/clients/lambda";
-import * as iam from "~/aws/clients/iam";
-import * as dynamodb from "~/aws/clients/dynamodb";
-import * as apigatewayv2 from "~/aws/clients/apigatewayv2";
+import { clients } from "@effect-ak/effortless-aws";
+
+const { lambda, iam, dynamodb, apigatewayv2 } = clients;
 
 type ResourceType = "lambda" | "iam-role" | "dynamodb" | "api-gateway";
 

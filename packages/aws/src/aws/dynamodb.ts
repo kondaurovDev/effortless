@@ -1,6 +1,10 @@
 import { Effect } from "effect";
-import { dynamodb, lambda } from "./clients";
-import type { TableConfig, KeyType, StreamView } from "~/handlers/define-table";
+import * as dynamodb from "../clients/dynamodb.js";
+import * as lambda from "../clients/lambda.js";
+
+// Types from define-table (duplicated to avoid circular dependency)
+export type KeyType = "string" | "number" | "binary";
+export type StreamView = "NEW_IMAGE" | "OLD_IMAGE" | "NEW_AND_OLD_IMAGES" | "KEYS_ONLY";
 import { toAwsTagList } from "./tags";
 
 const keyTypeToDynamoDB = (type: KeyType): "S" | "N" | "B" => {

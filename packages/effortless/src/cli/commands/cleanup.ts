@@ -1,10 +1,14 @@
 import { Command, Options } from "@effect/cli";
 import { Effect, Console, Logger, LogLevel, Option } from "effect";
 
-import { getResourcesByTags, groupResourcesByHandler } from "~/aws/tags";
+import {
+  getResourcesByTags,
+  groupResourcesByHandler,
+  listEffortlessRoles,
+  deleteRole,
+  makeClients
+} from "@effect-ak/effortless-aws";
 import { deleteResources, type ResourceInfo } from "~/deploy/cleanup";
-import { listEffortlessRoles, deleteRole } from "~/aws/iam";
-import { makeClients } from "~/aws/clients";
 import { loadConfig, projectOption, stageOption, regionOption, verboseOption, dryRunOption } from "../config";
 
 const handlerOption = Options.text("handler").pipe(

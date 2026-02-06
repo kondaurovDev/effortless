@@ -1,11 +1,17 @@
 import { Effect } from "effect";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { ensureRole } from "~/aws/iam";
-import { ensureLambda } from "~/aws/lambda";
+import {
+  ensureRole,
+  ensureLambda,
+  makeTags,
+  resolveStage,
+  type TagContext,
+  ensureLayer,
+  readProductionDependencies,
+  collectLayerPackages
+} from "@effect-ak/effortless-aws";
 import { bundle, zip, type BundleInput } from "~/build/bundle";
-import { makeTags, resolveStage, type TagContext } from "~/aws/tags";
-import { ensureLayer, readProductionDependencies, collectLayerPackages } from "~/aws/layer";
 
 // ============ Common types ============
 

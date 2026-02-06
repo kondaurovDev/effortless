@@ -1,7 +1,9 @@
 import { Effect } from "effect";
-import * as apigatewayv2 from "./clients/apigatewayv2";
-import * as lambda from "./clients/lambda";
-import type { HttpMethod } from "~/handlers/define-http";
+import * as apigatewayv2 from "../clients/apigatewayv2.js";
+import * as lambda from "../clients/lambda.js";
+
+// Type from define-http (duplicated to avoid circular dependency)
+export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS" | "HEAD" | "ANY";
 
 export type ProjectApiConfig = {
   projectName: string;

@@ -1,10 +1,17 @@
 import { Effect } from "effect";
 import * as path from "path";
-import { ensureProjectApi, addRouteToApi } from "~/aws/apigateway";
+import {
+  ensureProjectApi,
+  addRouteToApi,
+  makeClients,
+  makeTags,
+  resolveStage,
+  type TagContext,
+  ensureLayer,
+  readProductionDependencies,
+  collectLayerPackages
+} from "@effect-ak/effortless-aws";
 import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "~/build/bundle";
-import { makeClients } from "~/aws/clients";
-import { makeTags, resolveStage, type TagContext } from "~/aws/tags";
-import { ensureLayer, readProductionDependencies, collectLayerPackages } from "~/aws/layer";
 
 // Re-export from shared
 export {

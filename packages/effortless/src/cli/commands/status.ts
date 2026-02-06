@@ -1,11 +1,15 @@
 import { Command } from "@effect/cli";
 import { Effect, Console, Logger, LogLevel, Option } from "effect";
 
-import { getResourcesByTags, groupResourcesByHandler } from "~/aws/tags";
-import { makeClients } from "~/aws/clients";
+import {
+  getResourcesByTags,
+  groupResourcesByHandler,
+  makeClients,
+  clients
+} from "@effect-ak/effortless-aws";
 import { loadConfig, projectOption, stageOption, regionOption, verboseOption } from "../config";
-import * as lambda from "~/aws/clients/lambda";
-import * as apigateway from "~/aws/clients/apigatewayv2";
+
+const { lambda, apigatewayv2: apigateway } = clients;
 
 type ResourceDetails = {
   type: string;

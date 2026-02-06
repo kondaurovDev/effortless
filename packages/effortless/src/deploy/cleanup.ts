@@ -1,9 +1,11 @@
 import { Effect } from "effect";
-import { deleteLambda } from "~/aws/lambda";
-import { deleteApi } from "~/aws/apigateway";
-import { deleteRole } from "~/aws/iam";
-import { deleteTable } from "~/aws/dynamodb";
-import { deleteLayerVersion } from "~/aws/layer";
+import {
+  deleteLambda,
+  deleteApi,
+  deleteRole,
+  deleteTable,
+  deleteLayerVersion
+} from "@effect-ak/effortless-aws";
 
 export type ResourceInfo = {
   arn: string;

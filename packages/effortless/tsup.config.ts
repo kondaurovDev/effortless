@@ -10,7 +10,7 @@ export default defineConfig([
     dts: true,
     sourcemap: true,
     clean: true,
-    external: ["effect"],
+    external: ["effect", "@effect-ak/effortless-aws"],
   },
   // CLI - bundle effect so users don't need it
   {
@@ -32,6 +32,7 @@ export default defineConfig([
       "esbuild",
       "ts-morph",
       "glob",
+      "@effect-ak/effortless-aws",
     ],
     banner: {
       js: `import { createRequire } from 'module'; const require = createRequire(import.meta.url);`,

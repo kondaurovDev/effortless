@@ -1,8 +1,13 @@
 import { Effect } from "effect";
-import { ensureProjectApi, addRouteToApi } from "~/aws/apigateway";
 import { extractConfigs, type ExtractedFunction } from "~/build/bundle";
-import { makeClients } from "~/aws/clients";
-import { makeTags, resolveStage, type TagContext } from "~/aws/tags";
+import {
+  ensureProjectApi,
+  addRouteToApi,
+  makeClients,
+  makeTags,
+  resolveStage,
+  type TagContext
+} from "@effect-ak/effortless-aws";
 import {
   type DeployInput,
   type DeployResult,

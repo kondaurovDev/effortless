@@ -4,7 +4,7 @@ import * as path from "path";
 
 import { deploy, deployAll, deployTable, deployAllTables, deployProject, type DeployTableResult } from "~/deploy/deploy";
 import { findHandlerFiles, discoverHandlers } from "~/build/bundle";
-import { makeClients } from "~/aws/clients";
+import { makeClients } from "@effect-ak/effortless-aws";
 import { loadConfig, projectOption, stageOption, regionOption, verboseOption, getPatternsFromConfig } from "~/cli/config";
 
 const deployTargetArg = Args.text({ name: "target" }).pipe(

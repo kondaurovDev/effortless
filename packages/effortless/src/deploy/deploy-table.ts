@@ -1,8 +1,13 @@
 import { Effect } from "effect";
 import { extractTableConfigs, type ExtractedTableFunction } from "~/build/bundle";
-import { makeClients } from "~/aws/clients";
-import { ensureTable, ensureEventSourceMapping } from "~/aws/dynamodb";
-import { makeTags, resolveStage, type TagContext } from "~/aws/tags";
+import {
+  makeClients,
+  ensureTable,
+  ensureEventSourceMapping,
+  makeTags,
+  resolveStage,
+  type TagContext
+} from "@effect-ak/effortless-aws";
 import {
   type DeployInput,
   type DeployTableResult,

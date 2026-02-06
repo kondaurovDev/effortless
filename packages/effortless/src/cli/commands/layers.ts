@@ -3,8 +3,14 @@ import { Effect, Console, Logger, LogLevel, Option } from "effect";
 import * as path from "path";
 import * as fs from "fs";
 
-import { listLayerVersions, deleteAllLayerVersions, collectLayerPackages, readProductionDependencies, computeLockfileHash } from "~/aws/layer";
-import { makeClients } from "~/aws/clients";
+import {
+  listLayerVersions,
+  deleteAllLayerVersions,
+  collectLayerPackages,
+  readProductionDependencies,
+  computeLockfileHash,
+  makeClients
+} from "@effect-ak/effortless-aws";
 import { loadConfig, projectOption, regionOption, verboseOption, outputOption, dryRunOption } from "../config";
 
 const layersCleanupAllOption = Options.boolean("all").pipe(
