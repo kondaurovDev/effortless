@@ -21,3 +21,10 @@ export type { LayerConfig, LayerResult, LayerVersionInfo } from "./layer";
 // Tags
 export { makeTags, toAwsTagList, resolveStage, getResourcesByTags, findOrphanedResources, groupResourcesByHandler } from "./tags";
 export type { ResourceType, TagContext } from "./tags";
+
+// Clients
+export * as Aws from "./clients/index";
+
+// Re-export useful utilities from AWS SDK
+export { unmarshall, marshall } from "@aws-sdk/util-dynamodb";
+export type { ResourceTagMapping } from "@aws-sdk/client-resource-groups-tagging-api";

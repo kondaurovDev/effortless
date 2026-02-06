@@ -2,14 +2,13 @@ import { Command } from "@effect/cli";
 import { Effect, Console, Logger, LogLevel, Option } from "effect";
 
 import {
+  Aws,
   getResourcesByTags,
-  groupResourcesByHandler,
-  makeClients,
-  clients
+  groupResourcesByHandler
 } from "@effect-ak/effortless-aws";
-import { loadConfig, projectOption, stageOption, regionOption, verboseOption } from "../config";
+import { loadConfig, projectOption, stageOption, regionOption, verboseOption } from "~/cli/config";
 
-const { lambda, apigatewayv2: apigateway } = clients;
+const { lambda, apigatewayv2: apigateway } = Aws;
 
 type ResourceDetails = {
   type: string;
@@ -103,7 +102,7 @@ export const statusCommand = Command.make(
         return;
       }
 
-      const clientsLayer = makeClients({
+      const clientsLayer = Aws.makeClients({
         lambda: { region: finalRegion },
         iam: { region: finalRegion },
         apigatewayv2: { region: finalRegion },

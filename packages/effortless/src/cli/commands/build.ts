@@ -3,9 +3,9 @@ import { Effect, Console, Option } from "effect";
 import * as path from "path";
 import * as fs from "fs";
 
-import { bundle, extractConfigs, extractTableConfigs, findHandlerFiles, discoverHandlers } from "../../build/bundle";
+import { bundle, extractConfigs, extractTableConfigs, findHandlerFiles, discoverHandlers } from "~/build/bundle";
 import { collectLayerPackages, readProductionDependencies } from "@effect-ak/effortless-aws";
-import { loadConfig, verboseOption, outputOption, getPatternsFromConfig } from "../config";
+import { loadConfig, verboseOption, outputOption, getPatternsFromConfig } from "~/cli/config";
 
 const buildFileArg = Args.file({ name: "file", exists: "yes" }).pipe(
   Args.withDescription("Handler file to build"),

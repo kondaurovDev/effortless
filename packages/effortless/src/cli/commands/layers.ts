@@ -4,14 +4,14 @@ import * as path from "path";
 import * as fs from "fs";
 
 import {
+  Aws,
   listLayerVersions,
   deleteAllLayerVersions,
   collectLayerPackages,
   readProductionDependencies,
-  computeLockfileHash,
-  makeClients
+  computeLockfileHash
 } from "@effect-ak/effortless-aws";
-import { loadConfig, projectOption, regionOption, verboseOption, outputOption, dryRunOption } from "../config";
+import { loadConfig, projectOption, regionOption, verboseOption, outputOption, dryRunOption } from "~/cli/config";
 
 const layersCleanupAllOption = Options.boolean("all").pipe(
   Options.withDescription("Delete all layer versions")
@@ -94,7 +94,7 @@ const layersCleanupCommand = Command.make(
 
       const layerName = `${project}-deps`;
 
-      const clientsLayer = makeClients({
+      const clientsLayer = Aws.makeClients({
         lambda: { region: finalRegion },
       });
 

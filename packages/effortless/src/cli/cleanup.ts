@@ -1,7 +1,7 @@
 import { Effect, Console } from "effect";
-import { clients, type ResourceTagMapping } from "@effect-ak/effortless-aws";
+import { Aws, type ResourceTagMapping } from "@effect-ak/effortless-aws";
 
-const { lambda, iam, dynamodb, apigatewayv2 } = clients;
+const { lambda, iam, dynamodb, apigatewayv2 } = Aws;
 
 type ResourceType = "lambda" | "iam-role" | "dynamodb" | "api-gateway";
 

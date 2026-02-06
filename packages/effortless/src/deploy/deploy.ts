@@ -1,9 +1,9 @@
 import { Effect } from "effect";
 import * as path from "path";
 import {
+  Aws,
   ensureProjectApi,
   addRouteToApi,
-  makeClients,
   makeTags,
   resolveStage,
   type TagContext,
@@ -11,7 +11,7 @@ import {
   readProductionDependencies,
   collectLayerPackages
 } from "@effect-ak/effortless-aws";
-import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "../build/bundle";
+import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "~/build/bundle";
 
 // Re-export from shared
 export {
@@ -48,7 +48,7 @@ const prepareLayer = (input: PrepareLayerInput) =>
       projectDir: input.projectDir
     }).pipe(
       Effect.provide(
-        makeClients({
+        Aws.makeClients({
           lambda: { region: input.region }
         })
       )
@@ -105,7 +105,7 @@ const deployHttpHandlers = (ctx: DeployHttpHandlersInput) =>
           ...(ctx.external.length > 0 ? { external: ctx.external } : {})
         }).pipe(
           Effect.provide(
-            makeClients({
+            Aws.makeClients({
               lambda: { region: ctx.input.region },
               iam: { region: ctx.input.region }
             })
@@ -120,7 +120,7 @@ const deployHttpHandlers = (ctx: DeployHttpHandlersInput) =>
           path: config.path
         }).pipe(
           Effect.provide(
-            makeClients({
+            Aws.makeClients({
               lambda: { region: ctx.input.region },
               apigatewayv2: { region: ctx.input.region }
             })
@@ -167,7 +167,7 @@ const deployTableHandlers = (ctx: DeployTableHandlersInput) =>
           ...(ctx.external.length > 0 ? { external: ctx.external } : {})
         }).pipe(
           Effect.provide(
-            makeClients({
+            Aws.makeClients({
               lambda: { region: ctx.input.region },
               iam: { region: ctx.input.region },
               dynamodb: { region: ctx.input.region }
@@ -245,7 +245,7 @@ export const deployProject = (input: DeployProjectInput) =>
         tags: makeTags(tagCtx, "api-gateway")
       }).pipe(
         Effect.provide(
-          makeClients({
+          Aws.makeClients({
             apigatewayv2: { region: input.region }
           })
         )

@@ -1,9 +1,9 @@
 import { Effect } from "effect";
-import { extractConfigs, type ExtractedFunction } from "../build/bundle";
+import { extractConfigs, type ExtractedFunction } from "~/build/bundle";
 import {
+  Aws,
   ensureProjectApi,
   addRouteToApi,
-  makeClients,
   makeTags,
   resolveStage,
   type TagContext
@@ -110,7 +110,7 @@ export const deploy = (input: DeployInput) =>
     } satisfies DeployResult;
   }).pipe(
     Effect.provide(
-      makeClients({
+      Aws.makeClients({
         lambda: { region: input.region },
         iam: { region: input.region },
         apigatewayv2: { region: input.region }
@@ -185,7 +185,7 @@ export const deployAll = (input: DeployInput) =>
     } satisfies DeployAllResult;
   }).pipe(
     Effect.provide(
-      makeClients({
+      Aws.makeClients({
         lambda: { region: input.region },
         iam: { region: input.region },
         apigatewayv2: { region: input.region }

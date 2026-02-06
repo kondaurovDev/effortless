@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import { extractTableConfigs, type ExtractedTableFunction } from "../build/bundle";
+import { extractTableConfigs, type ExtractedTableFunction } from "~/build/bundle";
 import {
-  makeClients,
+  Aws,
   ensureTable,
   ensureEventSourceMapping,
   makeTags,
@@ -112,7 +112,7 @@ export const deployTable = (input: DeployInput) =>
     return result;
   }).pipe(
     Effect.provide(
-      makeClients({
+      Aws.makeClients({
         lambda: { region: input.region },
         iam: { region: input.region },
         dynamodb: { region: input.region }
@@ -152,7 +152,7 @@ export const deployAllTables = (input: DeployInput) =>
     return results;
   }).pipe(
     Effect.provide(
-      makeClients({
+      Aws.makeClients({
         lambda: { region: input.region },
         iam: { region: input.region },
         dynamodb: { region: input.region }

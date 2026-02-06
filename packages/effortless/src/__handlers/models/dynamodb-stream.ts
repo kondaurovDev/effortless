@@ -1,6 +1,6 @@
 import * as S from "effect/Schema";
 
-import { ReceiptHandle } from "../internal/sqs-types";
+import { ReceiptHandle } from "~/__handlers/internal/sqs-types";
 
 export type DDbBatchStreamEvent =
   typeof DDbBatchStreamEvent.Type

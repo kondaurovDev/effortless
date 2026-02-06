@@ -2,14 +2,14 @@ import { Command, Options } from "@effect/cli";
 import { Effect, Console, Logger, LogLevel, Option } from "effect";
 
 import {
+  Aws,
   getResourcesByTags,
   groupResourcesByHandler,
   listEffortlessRoles,
-  deleteRole,
-  makeClients
+  deleteRole
 } from "@effect-ak/effortless-aws";
-import { deleteResources, type ResourceInfo } from "../../deploy/cleanup";
-import { loadConfig, projectOption, stageOption, regionOption, verboseOption, dryRunOption } from "../config";
+import { deleteResources, type ResourceInfo } from "~/deploy/cleanup";
+import { loadConfig, projectOption, stageOption, regionOption, verboseOption, dryRunOption } from "~/cli/config";
 
 const handlerOption = Options.text("handler").pipe(
   Options.withAlias("h"),
@@ -38,7 +38,7 @@ export const cleanupCommand = Command.make(
         return;
       }
 
-      const clientsLayer = makeClients({
+      const clientsLayer = Aws.makeClients({
         lambda: { region: finalRegion },
         iam: { region: finalRegion },
         apigatewayv2: { region: finalRegion },
@@ -134,7 +134,7 @@ export const cleanupRolesCommand = Command.make(
       const finalStage = config?.stage ?? stage;
       const finalRegion = config?.region ?? region;
 
-      const clientsLayer = makeClients({
+      const clientsLayer = Aws.makeClients({
         iam: { region: finalRegion },
       });
 
