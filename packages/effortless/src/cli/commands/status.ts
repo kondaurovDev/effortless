@@ -7,7 +7,7 @@ import {
   makeClients,
   clients
 } from "@effect-ak/effortless-aws";
-import { loadConfig, projectOption, stageOption, regionOption, verboseOption } from "../config";
+import { loadConfig, projectOption, stageOption, regionOption, verboseOption } from "../config.js";
 
 const { lambda, apigatewayv2: apigateway } = clients;
 
@@ -21,16 +21,16 @@ type ResourceDetails = {
   url?: string;
 };
 
-const extractApiId = (arn: string): string | null => {
+const extractApiId = (arn: string): string | undefined => {
   // arn:aws:apigateway:eu-central-1::/apis/o4epasmyie
   const match = arn.match(/\/apis\/([a-z0-9]+)$/);
-  return match ? match[1] : null;
+  return match?.[1];
 };
 
-const extractFunctionName = (arn: string): string | null => {
+const extractFunctionName = (arn: string): string | undefined => {
   // arn:aws:lambda:eu-central-1:906667703291:function:family-budget-expense-api
   const match = arn.match(/:function:([^:]+)$/);
-  return match ? match[1] : null;
+  return match?.[1];
 };
 
 const formatDate = (date: Date | string | undefined): string => {
@@ -62,7 +62,7 @@ type ApiDetails = {
   url?: string;
 };
 
-const getLambdaDetails = (functionName: string): Effect.Effect<LambdaDetails, never, lambda.LambdaClient> =>
+const getLambdaDetails = (functionName: string) =>
   Effect.gen(function* () {
     const config = yield* lambda.make("get_function_configuration", {
       FunctionName: functionName,
@@ -77,7 +77,7 @@ const getLambdaDetails = (functionName: string): Effect.Effect<LambdaDetails, ne
     Effect.catchAll(() => Effect.succeed({} as LambdaDetails))
   );
 
-const getApiGatewayDetails = (apiId: string): Effect.Effect<ApiDetails, never, apigateway.ApiGatewayV2Client> =>
+const getApiGatewayDetails = (apiId: string) =>
   Effect.gen(function* () {
     const api = yield* apigateway.make("get_api", { ApiId: apiId });
     return {

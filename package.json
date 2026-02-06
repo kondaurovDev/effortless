@@ -10,5 +10,8 @@
   },
   "devDependencies": {
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@effect-ak/aws-sdk": "file:/Users/alexanderkondaurov/Projects/aws-sdk/dist/effect-ak-aws-services-0.0.1.tgz"
   }
 }

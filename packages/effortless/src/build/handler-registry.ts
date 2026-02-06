@@ -83,8 +83,9 @@ export const extractHandlerConfigs = <T>(source: string, type: HandlerType): Ext
       const callExpr = expr.asKindOrThrow(SyntaxKind.CallExpression);
       if (callExpr.getExpression().getText() === defineFn) {
         const args = callExpr.getArguments();
-        if (args.length >= 1 && args[0].getKind() === SyntaxKind.ObjectLiteralExpression) {
-          const objLiteral = args[0] as ObjectLiteralExpression;
+        const firstArg = args[0];
+        if (firstArg && firstArg.getKind() === SyntaxKind.ObjectLiteralExpression) {
+          const objLiteral = firstArg as ObjectLiteralExpression;
           const configText = buildConfigWithoutRuntime(objLiteral);
           const configObj = new Function(`return ${configText}`)() as T;
           const hasHandler = extractPropertyFromObject(objLiteral, handlerProp) !== undefined;
@@ -105,8 +106,9 @@ export const extractHandlerConfigs = <T>(source: string, type: HandlerType): Ext
       if (callExpr.getExpression().getText() !== defineFn) return;
 
       const args = callExpr.getArguments();
-      if (args.length >= 1 && args[0].getKind() === SyntaxKind.ObjectLiteralExpression) {
-        const objLiteral = args[0] as ObjectLiteralExpression;
+      const firstArg = args[0];
+      if (firstArg && firstArg.getKind() === SyntaxKind.ObjectLiteralExpression) {
+        const objLiteral = firstArg as ObjectLiteralExpression;
         const configText = buildConfigWithoutRuntime(objLiteral);
         const configObj = new Function(`return ${configText}`)() as T;
         const hasHandler = extractPropertyFromObject(objLiteral, handlerProp) !== undefined;

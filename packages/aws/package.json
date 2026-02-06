@@ -8,6 +8,8 @@
     "dist"
   ],
   "scripts": {
+    "gen": "gen-aws-sdk",
+    "prebuild": "pnpm gen",
     "build": "tsup",
     "build:watch": "tsup --watch",
     "typecheck": "tsc --noEmit"
@@ -38,7 +40,8 @@
     "@types/node": "^22.10.1",
     "effect": "^3.19.14",
     "tsup": "^8.5.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@effect-ak/aws-sdk": "/Users/alexanderkondaurov/Projects/aws-sdk/dist/effect-ak-aws-sdk-1.0.0-rc.2.tgz"
   },
   "peerDependencies": {
     "effect": "^3.19.14"

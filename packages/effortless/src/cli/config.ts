@@ -3,7 +3,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { pathToFileURL } from "url";
 import * as esbuild from "esbuild";
-import type { EffortlessConfig } from "~/config";
+import type { EffortlessConfig } from "../config.js";
 
 export const loadConfig = async (): Promise<EffortlessConfig | null> => {
   const configPath = path.resolve(process.cwd(), "effortless.config.ts");
@@ -21,7 +21,11 @@ export const loadConfig = async (): Promise<EffortlessConfig | null> => {
     external: ["@effect-ak/effortless"],
   });
 
-  const code = result.outputFiles[0].text;
+  const output = result.outputFiles?.[0];
+  if (!output) {
+    return null;
+  }
+  const code = output.text;
   const tempFile = path.join(process.cwd(), ".effortless-config.mjs");
   fs.writeFileSync(tempFile, code);
 

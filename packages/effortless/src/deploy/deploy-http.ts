@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { extractConfigs, type ExtractedFunction } from "~/build/bundle";
+import { extractConfigs, type ExtractedFunction } from "../build/bundle.js";
 import {
   ensureProjectApi,
   addRouteToApi,
@@ -58,7 +58,7 @@ export const deploy = (input: DeployInput) =>
 
     // Find specific export or use first one
     const targetExport = input.exportName ?? "default";
-    const fn = configs.find(c => c.exportName === targetExport) ?? configs[0];
+    const fn = configs.find(c => c.exportName === targetExport) ?? configs[0]!;
     const config = fn.config;
     const handlerName = config.name ?? fn.exportName;
 

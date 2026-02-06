@@ -19,7 +19,7 @@ const extractResourceName = (arn: string, type: string): string => {
     case "lambda": {
       // arn:aws:lambda:region:account:function:name
       const parts = arn.split(":");
-      return parts[parts.length - 1];
+      return parts[parts.length - 1] ?? arn;
     }
     case "api-gateway": {
       // arn:aws:apigateway:region::/apis/apiId
@@ -29,17 +29,17 @@ const extractResourceName = (arn: string, type: string): string => {
     case "iam-role": {
       // arn:aws:iam::account:role/name
       const parts = arn.split("/");
-      return parts[parts.length - 1];
+      return parts[parts.length - 1] ?? arn;
     }
     case "dynamodb": {
       // arn:aws:dynamodb:region:account:table/name
       const parts = arn.split("/");
-      return parts[parts.length - 1];
+      return parts[parts.length - 1] ?? arn;
     }
     case "lambda-layer": {
       // arn:aws:lambda:region:account:layer:name:version
       const parts = arn.split(":");
-      return parts[parts.length - 2]; // layer name (without version)
+      return parts[parts.length - 2] ?? arn; // layer name (without version)
     }
     default:
       return arn;
@@ -50,8 +50,8 @@ const extractLayerInfo = (arn: string): LayerInfo => {
   // arn:aws:lambda:region:account:layer:name:version
   const parts = arn.split(":");
   return {
-    name: parts[parts.length - 2],
-    version: parseInt(parts[parts.length - 1], 10)
+    name: parts[parts.length - 2] ?? "",
+    version: parseInt(parts[parts.length - 1] ?? "0", 10)
   };
 };
 

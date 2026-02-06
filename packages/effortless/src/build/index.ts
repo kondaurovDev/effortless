@@ -1,5 +1,5 @@
-export { handlerRegistry, generateEntryPoint, extractHandlerConfigs } from "./handler-registry";
-export type { HandlerType, HandlerDefinition, ExtractedConfig } from "./handler-registry";
+export { handlerRegistry, generateEntryPoint, extractHandlerConfigs } from "./handler-registry.js";
+export type { HandlerType, HandlerDefinition, ExtractedConfig } from "./handler-registry.js";
 
 export {
   bundle,
@@ -9,11 +9,11 @@ export {
   extractTableConfigs,
   findHandlerFiles,
   discoverHandlers
-} from "./bundle";
+} from "./bundle.js";
 export type {
   BundleInput,
   ZipInput,
   ExtractedFunction,
   ExtractedTableFunction,
   DiscoveredHandlers
-} from "./bundle";
+} from "./bundle.js";

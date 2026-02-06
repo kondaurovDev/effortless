@@ -11,7 +11,7 @@ import {
   computeLockfileHash,
   makeClients
 } from "@effect-ak/effortless-aws";
-import { loadConfig, projectOption, regionOption, verboseOption, outputOption, dryRunOption } from "../config";
+import { loadConfig, projectOption, regionOption, verboseOption, outputOption, dryRunOption } from "../config.js";
 
 const layersCleanupAllOption = Options.boolean("all").pipe(
   Options.withDescription("Delete all layer versions")
@@ -236,7 +236,7 @@ const layersBuildCommand = Command.make(
         const destPath = path.join(layerDir, pkgName);
 
         if (pkgName.startsWith("@")) {
-          const scopeDir = path.join(layerDir, pkgName.split("/")[0]);
+          const scopeDir = path.join(layerDir, pkgName.split("/")[0] ?? pkgName);
           if (!fs.existsSync(scopeDir)) {
             fs.mkdirSync(scopeDir, { recursive: true });
           }

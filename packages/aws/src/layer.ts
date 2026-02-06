@@ -106,10 +106,15 @@ const extractPackageName = (filePath: string): string | null => {
   const afterNodeModules = filePath.slice(nodeModulesIndex + "node_modules/".length);
   const parts = afterNodeModules.split("/");
 
-  if (parts[0].startsWith("@") && parts.length >= 2) {
-    return `${parts[0]}/${parts[1]}`;
+  const firstPart = parts[0];
+  if (!firstPart) return null;
+
+  if (firstPart.startsWith("@") && parts.length >= 2) {
+    const secondPart = parts[1];
+    if (!secondPart) return null;
+    return `${firstPart}/${secondPart}`;
   }
-  return parts[0] || null;
+  return firstPart;
 };
 
 /**

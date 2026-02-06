@@ -1,5 +1,5 @@
-import { unmarshall } from "@aws-sdk/util-dynamodb";
-import type { TableHandler, TableRecord, FailedRecord } from "~/handlers/define-table";
+import { unmarshall } from "@effect-ak/effortless-aws";
+import type { TableHandler, TableRecord, FailedRecord } from "../handlers/define-table.js";
 
 type DynamoDBStreamRecord = {
   eventName: "INSERT" | "MODIFY" | "REMOVE";

@@ -2,10 +2,13 @@ import { Effect } from "effect";
 import * as dynamodb from "../clients/dynamodb.js";
 import * as lambda from "../clients/lambda.js";
 
+import { toAwsTagList } from "./tags.js";
+
 // Types from define-table (duplicated to avoid circular dependency)
 export type KeyType = "string" | "number" | "binary";
 export type StreamView = "NEW_IMAGE" | "OLD_IMAGE" | "NEW_AND_OLD_IMAGES" | "KEYS_ONLY";
-import { toAwsTagList } from "./tags";
+export type BillingMode = "PAY_PER_REQUEST" | "PROVISIONED";
+export type KeyDefinition = { name: string; type: KeyType };
 
 const keyTypeToDynamoDB = (type: KeyType): "S" | "N" | "B" => {
   switch (type) {
@@ -23,9 +26,9 @@ const streamViewToSpec = (view: StreamView) => ({
 
 export type EnsureTableInput = {
   name: string;
-  pk: TableConfig["pk"];
-  sk?: TableConfig["sk"];
-  billingMode?: TableConfig["billingMode"];
+  pk: KeyDefinition;
+  sk?: KeyDefinition;
+  billingMode?: BillingMode;
   streamView?: StreamView;
   tags?: Record<string, string>;
 };

@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { extractTableConfigs, type ExtractedTableFunction } from "~/build/bundle";
+import { extractTableConfigs, type ExtractedTableFunction } from "../build/bundle.js";
 import {
   makeClients,
   ensureTable,
@@ -93,7 +93,7 @@ export const deployTable = (input: DeployInput) =>
 
     // Find specific export or use first one
     const targetExport = input.exportName ?? "default";
-    const fn = configs.find(c => c.exportName === targetExport) ?? configs[0];
+    const fn = configs.find(c => c.exportName === targetExport) ?? configs[0]!;
 
     // Ensure layer exists
     const { layerArn, external } = yield* ensureLayerAndExternal({

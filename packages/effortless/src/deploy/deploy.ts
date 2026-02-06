@@ -11,7 +11,7 @@ import {
   readProductionDependencies,
   collectLayerPackages
 } from "@effect-ak/effortless-aws";
-import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "~/build/bundle";
+import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "../build/bundle.js";
 
 // Re-export from shared
 export {
@@ -22,10 +22,10 @@ export {
 } from "./shared.js";
 
 // Re-export from deploy-http
-export { deploy, deployAll } from "./deploy-http";
+export { deploy, deployAll } from "./deploy-http.js";
 
 // Re-export from deploy-table
-export { deployTable, deployAllTables } from "./deploy-table";
+export { deployTable, deployAllTables } from "./deploy-table.js";
 
 // Import for internal use
 import { type DeployInput, type DeployResult, type DeployTableResult } from "./shared.js";

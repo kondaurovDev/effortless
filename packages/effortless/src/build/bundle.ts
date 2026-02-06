@@ -4,9 +4,9 @@ import * as fsSync from "fs";
 import * as path from "path";
 import archiver from "archiver";
 import { globSync } from "glob";
-import { generateEntryPoint, extractHandlerConfigs, type HandlerType, type ExtractedConfig } from "./handler-registry";
-import type { HttpConfig } from "~/handlers/define-http";
-import type { TableConfig } from "~/handlers/define-table";
+import { generateEntryPoint, extractHandlerConfigs, type HandlerType, type ExtractedConfig } from "./handler-registry.js";
+import type { HttpConfig } from "../handlers/define-http.js";
+import type { TableConfig } from "../handlers/define-table.js";
 
 export type BundleInput = {
   projectDir: string;
@@ -27,7 +27,7 @@ export const extractTableConfigs = (source: string): ExtractedTableFunction[] =>
 
 export const extractConfig = (source: string): HttpConfig | null => {
   const configs = extractConfigs(source);
-  return configs.length > 0 ? configs[0].config : null;
+  return configs.length > 0 ? configs[0]?.config ?? null : null;
 };
 
 // ============ Bundle (uses registry) ============
@@ -62,7 +62,11 @@ export const bundle = (input: BundleInput & { exportName?: string; external?: st
       catch: (error) => new Error(`esbuild failed: ${error}`)
     });
 
-    return result.outputFiles![0].text;
+    const output = result.outputFiles?.[0];
+    if (!output) {
+      throw new Error("esbuild produced no output");
+    }
+    return output.text;
   });
 
 export type ZipInput = {

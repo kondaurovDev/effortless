@@ -8,8 +8,8 @@ import {
   deleteRole,
   makeClients
 } from "@effect-ak/effortless-aws";
-import { deleteResources, type ResourceInfo } from "~/deploy/cleanup";
-import { loadConfig, projectOption, stageOption, regionOption, verboseOption, dryRunOption } from "../config";
+import { deleteResources, type ResourceInfo } from "../../deploy/cleanup.js";
+import { loadConfig, projectOption, stageOption, regionOption, verboseOption, dryRunOption } from "../config.js";
 
 const handlerOption = Options.text("handler").pipe(
   Options.withAlias("h"),
