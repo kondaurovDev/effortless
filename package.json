@@ -1,6 +1,6 @@
 {
   "name": "effortless-aws",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "license": "MIT",
   "type": "module",
   "description": "Code-first AWS Lambda framework",
