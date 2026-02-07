@@ -4,8 +4,18 @@
   "license": "MIT",
   "type": "module",
   "description": "Code-first AWS Lambda framework",
-  "files": ["dist"],
-  "keywords": ["aws", "lambda", "serverless", "effect", "typescript", "dynamodb", "api-gateway"],
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "aws",
+    "lambda",
+    "serverless",
+    "effect",
+    "typescript",
+    "dynamodb",
+    "api-gateway"
+  ],
   "bin": {
     "eff": "./dist/cli/index.js",
     "effortless": "./dist/cli/index.js"
@@ -17,7 +27,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rm -rf dist",
-    "pack": "pnpm build && rm -rf dist-pack && mkdir -p dist-pack && pnpm pack --pack-destination dist-pack"
+    "pack": "pnpm build && rm -rf dist-pack && mkdir -p dist-pack && pnpm pack --pack-destination dist-pack",
+    "changeset": "changeset",
+    "release": "changeset publish"
   },
   "exports": {
     "./package.json": "./package.json",
@@ -40,6 +52,8 @@
     "ts-morph": "^27.0.2"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^0.5.2",
+    "@changesets/cli": "^2.29.8",
     "@effect-ak/aws-sdk": "1.0.0-rc.2",
     "@effect/cli": "^0.73.1",
     "@effect/platform": "^0.94.2",
