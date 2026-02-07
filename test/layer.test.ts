@@ -164,7 +164,7 @@ describe("layer", () => {
       expect(result.buffer[1]).toBe(0x4b); // K
 
       const zip = new AdmZip(result.buffer);
-      const entries = zip.getEntries().map(e => e.entryName);
+      const entries = zip.getEntries().map((e) => e.entryName);
 
       // Check structure
       expect(entries).toContain("nodejs/node_modules/pkg-a/package.json");
@@ -186,7 +186,7 @@ describe("layer", () => {
       );
 
       const zip = new AdmZip(result.buffer);
-      const entries = zip.getEntries().map(e => e.entryName);
+      const entries = zip.getEntries().map((e: AdmZip.IZipEntry) => e.entryName);
 
       // Both should be in the zip
       expect(entries).toContain("nodejs/node_modules/pkg-b/package.json");
@@ -199,11 +199,11 @@ describe("layer", () => {
       );
 
       const zip = new AdmZip(result.buffer);
-      const entries = zip.getEntries().map(e => e.entryName);
+      const entries = zip.getEntries().map((e: AdmZip.IZipEntry) => e.entryName);
 
       expect(entries).toContain("nodejs/node_modules/pkg-a/package.json");
-      expect(entries.some(e => e.includes("pkg-b"))).toBe(false);
-      expect(entries.some(e => e.includes("dev-pkg"))).toBe(false);
+      expect(entries.some((e: string) => e.includes("pkg-b"))).toBe(false);
+      expect(entries.some((e: string) => e.includes("dev-pkg"))).toBe(false);
     });
 
     it("should handle scoped packages", async () => {
@@ -218,7 +218,7 @@ describe("layer", () => {
       );
 
       const zip = new AdmZip(result.buffer);
-      const entries = zip.getEntries().map(e => e.entryName);
+      const entries = zip.getEntries().map((e: AdmZip.IZipEntry) => e.entryName);
 
       expect(entries).toContain("nodejs/node_modules/@scope/pkg-d/package.json");
       expect(entries).toContain("nodejs/node_modules/@scope/pkg-d/index.js");

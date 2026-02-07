@@ -96,14 +96,15 @@ describe("defineTable bundle", () => {
     const configs = extractTableConfigs(source);
 
     expect(configs).toHaveLength(1);
-    expect(configs[0].exportName).toBe("orders");
-    expect(configs[0].config.name).toBe("orders");
-    expect(configs[0].config.pk).toEqual({ name: "id", type: "string" });
-    expect(configs[0].config.sk).toEqual({ name: "createdAt", type: "number" });
-    expect(configs[0].config.streamView).toBe("NEW_AND_OLD_IMAGES");
-    expect(configs[0].config.batchSize).toBe(50);
-    expect(configs[0].config.memory).toBe(512);
-    expect(configs[0].hasHandler).toBe(true);
+    const first = configs[0]!;
+    expect(first.exportName).toBe("orders");
+    expect(first.config.name).toBe("orders");
+    expect(first.config.pk).toEqual({ name: "id", type: "string" });
+    expect(first.config.sk).toEqual({ name: "createdAt", type: "number" });
+    expect(first.config.streamView).toBe("NEW_AND_OLD_IMAGES");
+    expect(first.config.batchSize).toBe(50);
+    expect(first.config.memory).toBe(512);
+    expect(first.hasHandler).toBe(true);
   });
 
   it("should extract defineTable config from default export", () => {
@@ -120,10 +121,11 @@ describe("defineTable bundle", () => {
     const configs = extractTableConfigs(source);
 
     expect(configs).toHaveLength(1);
-    expect(configs[0].exportName).toBe("default");
-    expect(configs[0].config.name).toBe("users");
-    expect(configs[0].config.pk).toEqual({ name: "userId", type: "string" });
-    expect(configs[0].hasHandler).toBe(true);
+    const first = configs[0]!;
+    expect(first.exportName).toBe("default");
+    expect(first.config.name).toBe("users");
+    expect(first.config.pk).toEqual({ name: "userId", type: "string" });
+    expect(first.hasHandler).toBe(true);
   });
 
   it("should extract defineTable config without handler (resource only)", () => {
@@ -139,9 +141,10 @@ describe("defineTable bundle", () => {
     const configs = extractTableConfigs(source);
 
     expect(configs).toHaveLength(1);
-    expect(configs[0].exportName).toBe("users");
-    expect(configs[0].config.name).toBe("users");
-    expect(configs[0].hasHandler).toBe(false);
+    const first = configs[0]!;
+    expect(first.exportName).toBe("users");
+    expect(first.config.name).toBe("users");
+    expect(first.hasHandler).toBe(false);
   });
 
   it("should bundle defineTable handler with DynamoDB unmarshall", async () => {

@@ -1,4 +1,4 @@
-import { unmarshall } from "../aws";
+import { unmarshall } from "@aws-sdk/util-dynamodb";
 import type { TableHandler, TableRecord, FailedRecord } from "~/handlers/define-table";
 
 type DynamoDBStreamRecord = {

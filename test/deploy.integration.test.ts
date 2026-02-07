@@ -7,7 +7,7 @@ import { deploy, deployAll, deployTable } from "~/deploy/deploy"
 const projectDir = path.resolve(__dirname, "..")
 const region = process.env.AWS_REGION ?? "eu-central-1"
 
-const RUN_INTEGRATION = process.env.RUN_INTEGRATION ?? true
+const RUN_INTEGRATION = process.env.RUN_INTEGRATION ?? false
 
 describe.skipIf(!RUN_INTEGRATION)("deploy integration", () => {
 

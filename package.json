@@ -58,14 +58,17 @@
     "@effect/cli": "^0.73.1",
     "@effect/platform": "^0.94.2",
     "@effect/platform-node": "^0.104.1",
+    "@types/adm-zip": "^0.5.7",
     "@types/archiver": "^7.0.0",
     "@types/aws-lambda": "^8.10.144",
     "@types/glob": "^9.0.0",
     "@types/node": "^22.19.9",
+    "adm-zip": "^0.5.16",
     "effect": "^3.19.16",
     "tsup": "^8.5.1",
     "type-fest": "^4.22.1",
     "typescript": "^5.9.3",
+    "vite-tsconfig-paths": "^6.0.5",
     "vitest": "^4.0.18"
   },
   "peerDependencies": {
