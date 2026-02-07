@@ -78,7 +78,7 @@ describe("defineTable bundle", () => {
 
   it("should extract defineTable config from named export", () => {
     const source = `
-      import { defineTable } from "@effect-ak/effortless";
+      import { defineTable } from "effortless-aws";
 
       export const orders = defineTable({
         name: "orders",
@@ -108,7 +108,7 @@ describe("defineTable bundle", () => {
 
   it("should extract defineTable config from default export", () => {
     const source = `
-      import { defineTable } from "@effect-ak/effortless";
+      import { defineTable } from "effortless-aws";
 
       export default defineTable({
         name: "users",
@@ -128,7 +128,7 @@ describe("defineTable bundle", () => {
 
   it("should extract defineTable config without handler (resource only)", () => {
     const source = `
-      import { defineTable } from "@effect-ak/effortless";
+      import { defineTable } from "effortless-aws";
 
       export const users = defineTable({
         name: "users",
@@ -171,7 +171,7 @@ describe("defineTable bundle", () => {
 
   it("should handle multiple defineTable exports", () => {
     const source = `
-      import { defineTable } from "@effect-ak/effortless";
+      import { defineTable } from "effortless-aws";
 
       export const orders = defineTable({
         name: "orders",

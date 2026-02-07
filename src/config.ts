@@ -4,7 +4,7 @@
  * @example
  * ```typescript
  * // effortless.config.ts
- * import { defineConfig } from "@effect-ak/effortless";
+ * import { defineConfig } from "effortless-aws";
  *
  * export default defineConfig({
  *   name: "my-service",
@@ -79,7 +79,7 @@ export type EffortlessConfig = {
  *
  * @example
  * ```typescript
- * import { defineConfig } from "@effect-ak/effortless";
+ * import { defineConfig } from "effortless-aws";
  *
  * export default defineConfig({
  *   name: "my-service",

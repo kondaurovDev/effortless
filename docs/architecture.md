@@ -15,7 +15,7 @@
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────┐
-│                  @effect-ak/effortless CLI                  │
+│                  effortless-aws CLI                  │
 │                                                         │
 │  1. Load config (effortless.config.ts)                  │
 │  2. Analyze handlers (ts-morph)                         │
@@ -53,7 +53,7 @@
 ## Package Structure
 
 ```
-@effect-ak/effortless/
+effortless-aws/
 ├── src/
 │   │
 │   ├── aws/                    # AWS operations (3 layers)

@@ -4,7 +4,7 @@
 
 ```typescript
 // effortless.config.ts
-import { defineConfig } from "@effect-ak/effortless";
+import { defineConfig } from "effortless-aws";
 
 export default defineConfig({
   // Required

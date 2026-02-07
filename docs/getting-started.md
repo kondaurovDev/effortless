@@ -46,7 +46,7 @@ See [Roadmap](./roadmap.md) for the full list of planned features.
 ## Installation
 
 ```bash
-npm install @effect-ak/effortless
+npm install effortless-aws
 ```
 
 ## Quick Start
@@ -55,7 +55,7 @@ npm install @effect-ak/effortless
 
 ```typescript
 // effortless.config.ts
-import { defineConfig } from "@effect-ak/effortless";
+import { defineConfig } from "effortless-aws";
 
 export default defineConfig({
   name: "my-service",
@@ -74,7 +74,7 @@ export default defineConfig({
 
 ```typescript
 // src/expenses.ts
-import { defineQueue, defineHttp, defineSchedule } from "@effect-ak/effortless";
+import { defineQueue, defineHttp, defineSchedule } from "effortless-aws";
 import { Schema } from "effect";
 
 // Queue handler - creates SQS queue + Lambda + event source mapping

@@ -18,7 +18,7 @@ export const loadConfig = async (): Promise<EffortlessConfig | null> => {
     write: false,
     format: "esm",
     platform: "node",
-    external: ["@effect-ak/effortless"],
+    external: ["effortless-aws"],
   });
 
   const output = result.outputFiles?.[0];
