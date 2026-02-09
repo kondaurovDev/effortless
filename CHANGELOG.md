@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.2.1
+
+### Patch Changes
+
+- [`3c1ca30`](https://github.com/kondaurovDev/effortless-aws/commit/3c1ca308f3ea8731ec65360156251c7a9a61aeb8) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Support custom content-type in HTTP responses: pass body as-is for non-JSON content types instead of always JSON.stringify
+
 ## 0.2.0
 
 ### Minor Changes
