@@ -5,7 +5,6 @@ import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as path from "path";
 import archiver from "archiver";
-import { nodeFileTrace } from "@vercel/nft";
 import { lambda } from "./clients";
 
 // Fixed date for deterministic zip (same content = same hash)
@@ -55,7 +54,7 @@ export const computeLockfileHash = (projectDir: string) =>
     }
 
     // Collect all transitive production packages
-    const allPackages = collectTransitiveDeps(projectDir, prodDeps);
+    const { packages: allPackages } = collectTransitiveDeps(projectDir, prodDeps);
 
     // Build a sorted list of package@version pairs
     const packageVersions: string[] = [];
@@ -94,29 +93,6 @@ export const readProductionDependencies = (projectDir: string) =>
     return Object.keys(pkg.dependencies ?? {});
   });
 
-/**
- * Extract package name from a file path that's inside node_modules.
- * Handles both regular and scoped packages.
- * e.g., "/path/node_modules/@aws-sdk/client-dynamodb/dist/index.js" -> "@aws-sdk/client-dynamodb"
- * e.g., "/path/node_modules/effect/dist/index.js" -> "effect"
- */
-const extractPackageName = (filePath: string): string | null => {
-  const nodeModulesIndex = filePath.lastIndexOf("node_modules");
-  if (nodeModulesIndex === -1) return null;
-
-  const afterNodeModules = filePath.slice(nodeModulesIndex + "node_modules/".length);
-  const parts = afterNodeModules.split("/");
-
-  const firstPart = parts[0];
-  if (!firstPart) return null;
-
-  if (firstPart.startsWith("@") && parts.length >= 2) {
-    const secondPart = parts[1];
-    if (!secondPart) return null;
-    return `${firstPart}/${secondPart}`;
-  }
-  return firstPart;
-};
 
 /**
  * Get the real path of a package in node_modules, following symlinks (pnpm support)
@@ -132,42 +108,6 @@ const getPackageRealPath = (projectDir: string, pkgName: string): string | null 
   }
 };
 
-/**
- * Find a valid JS entry point for a package.
- * Returns null if no entry point found (e.g., types-only packages).
- */
-const findPackageEntryPoint = (depPath: string): string | null => {
-  const pkgJsonPath = path.join(depPath, "package.json");
-  if (!fsSync.existsSync(pkgJsonPath)) return null;
-
-  try {
-    const pkgJson = JSON.parse(fsSync.readFileSync(pkgJsonPath, "utf-8"));
-
-    // Try various entry point fields
-    const candidates = [
-      pkgJson.main,
-      pkgJson.module,
-      pkgJson.exports?.["."]?.require,
-      pkgJson.exports?.["."]?.import,
-      pkgJson.exports?.["."]?.default,
-      typeof pkgJson.exports === "string" ? pkgJson.exports : null,
-      "index.js",
-      "index.cjs",
-      "index.mjs"
-    ].filter(Boolean);
-
-    for (const candidate of candidates) {
-      const entryPath = path.join(depPath, candidate);
-      if (fsSync.existsSync(entryPath) && fsSync.statSync(entryPath).isFile()) {
-        return entryPath;
-      }
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
-};
 
 /**
  * Get all dependencies from a package's package.json (regular + optional + peer)
@@ -220,6 +160,11 @@ const findInPnpmStore = (projectDir: string, pkgName: string): string | null => 
   return null;
 };
 
+export type CollectResult = {
+  packages: Set<string>;
+  warnings: string[];
+};
+
 /**
  * Recursively collect all packages including their declared dependencies.
  * This handles bundled packages (like those built with tsup) where
@@ -233,8 +178,9 @@ const collectTransitiveDeps = (
   projectDir: string,
   rootDeps: string[],
   searchPath: string = path.join(projectDir, "node_modules"),
-  visited = new Set<string>()
-): Set<string> => {
+  visited = new Set<string>(),
+  warnings: string[] = []
+): CollectResult => {
   const rootNodeModules = path.join(projectDir, "node_modules");
 
   for (const dep of rootDeps) {
@@ -247,8 +193,8 @@ const collectTransitiveDeps = (
     if (fsSync.existsSync(pkgPath)) {
       try {
         realPath = fsSync.realpathSync(pkgPath);
-      } catch {
-        // ignore
+      } catch (err) {
+        warnings.push(`realpathSync failed for "${dep}" at ${pkgPath}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
@@ -258,8 +204,8 @@ const collectTransitiveDeps = (
       if (fsSync.existsSync(pkgPath)) {
         try {
           realPath = fsSync.realpathSync(pkgPath);
-        } catch {
-          // ignore
+        } catch (err) {
+          warnings.push(`realpathSync failed for "${dep}" at ${pkgPath}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
     }
@@ -269,7 +215,10 @@ const collectTransitiveDeps = (
       realPath = findInPnpmStore(projectDir, dep);
     }
 
-    if (!realPath) continue;
+    if (!realPath) {
+      warnings.push(`Package "${dep}" not found (searched: ${searchPath}, root node_modules, pnpm store) — entire subtree skipped`);
+      continue;
+    }
 
     visited.add(dep);
 
@@ -284,55 +233,54 @@ const collectTransitiveDeps = (
         ? path.dirname(path.dirname(realPath))
         : path.dirname(realPath);
 
-      collectTransitiveDeps(projectDir, pkgDeps, pkgNodeModules, visited);
+      collectTransitiveDeps(projectDir, pkgDeps, pkgNodeModules, visited, warnings);
     }
   }
 
-  return visited;
+  return { packages: visited, warnings };
+};
+
+/** AWS packages available in the Lambda runtime — excluded from layer */
+const isAwsRuntime = (pkg: string) =>
+  pkg.startsWith("@aws-sdk/") || pkg.startsWith("@smithy/");
+
+export type CollectLayerResult = {
+  packages: string[];
+  warnings: string[];
 };
 
 /**
- * Use @vercel/nft to trace all packages needed by production dependencies.
- * Also includes declared dependencies from package.json for bundled packages.
- * Returns a list of package names that should be included in the layer.
+ * Collect all packages needed by production dependencies.
+ * Uses package.json declarations recursively, then verifies completeness
+ * and auto-adds any missing transitive deps as a safety net.
  */
-export const collectLayerPackages = async (projectDir: string, dependencies: string[]): Promise<string[]> => {
-  if (dependencies.length === 0) return [];
+export const collectLayerPackages = (projectDir: string, dependencies: string[]): CollectLayerResult => {
+  if (dependencies.length === 0) return { packages: [], warnings: [] };
 
-  // First, collect all transitive deps from package.json declarations
-  // This catches deps that can't be traced statically (e.g., bundled packages)
-  const packages = collectTransitiveDeps(projectDir, dependencies);
+  // Phase 1: collect all transitive deps from package.json declarations
+  const { packages, warnings } = collectTransitiveDeps(projectDir, dependencies);
 
-  // Also trace with @vercel/nft to catch dynamic imports and such
-  const entryPoints: string[] = [];
-  for (const dep of dependencies) {
-    const pkgPath = path.join(projectDir, "node_modules", dep);
-    if (fsSync.existsSync(pkgPath)) {
-      const entryPoint = findPackageEntryPoint(pkgPath);
-      if (entryPoint) {
-        entryPoints.push(entryPoint);
-      }
-    }
-  }
-
-  if (entryPoints.length > 0) {
-    try {
-      const { fileList } = await nodeFileTrace(entryPoints, {
-        base: projectDir
-      });
-
-      for (const file of fileList) {
-        const pkgName = extractPackageName(path.join(projectDir, file));
-        if (pkgName) {
-          packages.add(pkgName);
+  // Phase 2: verify completeness — ensure all deps of included packages are also included
+  // Loop until no new packages are discovered (handles multi-level gaps)
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const pkg of [...packages]) {
+      if (isAwsRuntime(pkg)) continue;
+      const pkgPath = findPackagePath(projectDir, pkg);
+      if (!pkgPath) continue;
+      const pkgDeps = getPackageDeps(pkgPath);
+      for (const dep of pkgDeps) {
+        if (!packages.has(dep) && !isAwsRuntime(dep)) {
+          packages.add(dep);
+          warnings.push(`Auto-added missing transitive dep: "${dep}" (required by "${pkg}")`);
+          changed = true;
         }
       }
-    } catch {
-      // If nft fails, we still have the declared deps
     }
   }
 
-  return Array.from(packages);
+  return { packages: Array.from(packages), warnings };
 };
 
 /**
@@ -455,8 +403,14 @@ export const ensureLayer = (config: LayerConfig) =>
       return existing;
     }
 
-    // Collect all packages using @vercel/nft
-    const allPackages = yield* Effect.promise(() => collectLayerPackages(config.projectDir, dependencies));
+    // Collect all packages via transitive dep walking + completeness verification
+    const { packages: allPackages, warnings: layerWarnings } = yield* Effect.sync(() => collectLayerPackages(config.projectDir, dependencies));
+
+    // Surface all warnings so issues are visible, not silently swallowed
+    for (const warning of layerWarnings) {
+      yield* Effect.logWarning(`[layer] ${warning}`);
+    }
+
     yield* Effect.logInfo(`Creating layer ${layerName} with ${allPackages.length} packages (hash: ${hash})`);
     yield* Effect.logDebug(`Layer packages: ${allPackages.join(", ")}`);
 

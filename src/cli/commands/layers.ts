@@ -52,7 +52,14 @@ const layersInfoCommand = Command.make(
         yield* Console.log("\nNo lockfile found (package-lock.json, pnpm-lock.yaml, or yarn.lock)");
       }
 
-      const allPackages = yield* Effect.promise(() => collectLayerPackages(projectDir, prodDeps));
+      const { packages: allPackages, warnings: layerWarnings } = yield* Effect.sync(() => collectLayerPackages(projectDir, prodDeps));
+
+      if (layerWarnings.length > 0) {
+        yield* Console.log(`\nWarnings (${layerWarnings.length}):`);
+        for (const w of layerWarnings) {
+          yield* Console.log(`  ⚠ ${w}`);
+        }
+      }
 
       yield* Console.log(`\nTotal packages for layer (${allPackages.length}):`);
 
@@ -208,7 +215,14 @@ const layersBuildCommand = Command.make(
 
       yield* Console.log(`\nLockfile hash: ${hash}`);
 
-      const allPackages = yield* Effect.promise(() => collectLayerPackages(projectDir, prodDeps));
+      const { packages: allPackages, warnings: layerWarnings } = yield* Effect.sync(() => collectLayerPackages(projectDir, prodDeps));
+
+      if (layerWarnings.length > 0) {
+        yield* Console.log(`\nWarnings (${layerWarnings.length}):`);
+        for (const w of layerWarnings) {
+          yield* Console.log(`  ⚠ ${w}`);
+        }
+      }
 
       yield* Console.log(`\nCollected ${allPackages.length} packages for layer`);
 

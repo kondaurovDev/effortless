@@ -76,9 +76,13 @@ export const ensureLayerAndExternal = (input: {
     const prodDeps = layerResult
       ? yield* readProductionDependencies(input.projectDir)
       : [];
-    const external = prodDeps.length > 0
-      ? yield* Effect.promise(() => collectLayerPackages(input.projectDir, prodDeps))
-      : [];
+    const { packages: external, warnings: layerWarnings } = prodDeps.length > 0
+      ? yield* Effect.sync(() => collectLayerPackages(input.projectDir, prodDeps))
+      : { packages: [] as string[], warnings: [] as string[] };
+
+    for (const warning of layerWarnings) {
+      yield* Effect.logWarning(`[layer] ${warning}`);
+    }
 
     return {
       layerArn: layerResult?.layerVersionArn,

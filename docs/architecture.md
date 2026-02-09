@@ -584,6 +584,104 @@ context: async ({ params }) => ({
 
 ---
 
+## Lambda Layer (Production Dependencies)
+
+The framework automatically creates a shared Lambda Layer containing all production dependencies from `package.json`. Handler code is bundled by esbuild with these dependencies marked as `external` — at runtime they're loaded from the layer at `/opt/nodejs/node_modules/`.
+
+### Package Manager Support
+
+The layer builder works with **any package manager** that produces a `node_modules` directory:
+
+| Package Manager | Supported | How it works |
+|---|---|---|
+| **npm** | Yes | Flat hoisted `node_modules/`, all packages at root level |
+| **yarn classic (v1)** | Yes | Same hoisted structure as npm |
+| **yarn berry + `nodeLinker: node-modules`** | Yes | Generates standard `node_modules/` |
+| **pnpm** | Yes | Follows symlinks via `realpathSync`, falls back to scanning `.pnpm/` store |
+
+> **Note:** Yarn Berry with Plug'n'Play (PnP) mode is not supported — it doesn't produce a `node_modules` directory.
+
+### How It Works
+
+The layer builder uses a two-phase approach: **recursive collection** and **completeness verification**.
+
+```
+package.json (dependencies)
+     │
+     ▼
+Phase 1: collectTransitiveDeps()
+     Recursively walks package.json → dependencies / optionalDependencies / peerDependencies
+     For pnpm: follows symlinks inside .pnpm/pkg@version/node_modules/
+     Fallbacks: searchPath → root node_modules → .pnpm store scan
+     │
+     ▼
+Phase 2: verify completeness
+     For every collected package, checks that ALL its declared deps are also collected.
+     Auto-adds any missing packages. Loops until no new packages are discovered.
+     │
+     ▼
+createLayerZip()
+     Packs all packages into nodejs/node_modules/{name}/ structure
+     Deterministic zip (fixed dates) → same content = same hash
+     │
+     ▼
+ensureLayer()
+     Hash-based versioning: only publishes a new layer version when deps change
+     Reuses existing layer if hash matches
+```
+
+#### Phase 1: Recursive collection
+
+Starting from direct `dependencies` in the project's `package.json`, the builder walks the dependency tree by reading each package's own `package.json`:
+
+```
+googleapis
+  → google-auth-library     (declared in googleapis/package.json)
+    → gaxios                 (declared in google-auth-library/package.json)
+      → node-fetch           (declared in gaxios/package.json)
+        → whatwg-url          (declared in node-fetch/package.json)
+```
+
+For **pnpm**, each recursive step resolves through the `.pnpm` store structure:
+1. Find package in current `searchPath` (e.g., `.pnpm/googleapis@140.0.0/node_modules/`)
+2. `realpathSync` to resolve symlinks to actual package location
+3. Fall back to root `node_modules/` (for hoisted deps)
+4. Fall back to scanning `.pnpm/` directory entries
+
+#### Phase 2: Completeness verification
+
+After collection, a verification loop acts as a safety net. For every package in the set, it checks that all declared dependencies are also present. If a transitive dep was missed (e.g., due to a broken symlink or pnpm edge case), it's **automatically added** and a warning is logged:
+
+```
+⚠ [layer] Auto-added missing transitive dep: "whatwg-url" (required by "node-fetch")
+```
+
+This eliminates the class of runtime errors like `Cannot find module 'whatwg-url'` — if a package declares a dependency, it will be in the layer.
+
+### Warnings
+
+All layer operations produce visible warnings instead of silently swallowing errors:
+
+- **Package not found**: `Package "foo" not found (searched: ...) — entire subtree skipped`
+- **Auto-added deps**: `Auto-added missing transitive dep: "bar" (required by "foo")`
+- **Symlink failures**: `realpathSync failed for "foo" at /path: ENOENT`
+- **Skipped packages**: `Skipped N packages (not found): ...`
+
+### Layer Reuse
+
+Layers are versioned by a SHA-256 hash of all `package@version` pairs. If the hash matches an existing published layer version, it's reused — no re-upload needed. This makes deploys fast when only handler code changes.
+
+```
+Layer name:    ${project}-${stage}-deps
+Description:   effortless deps layer hash:abc12345
+```
+
+### AWS SDK Handling
+
+AWS SDK v3 packages (`@aws-sdk/*`, `@smithy/*`) are **always excluded** from both the layer and the handler bundle. They're provided by the Lambda Node.js runtime, which keeps the layer size small and avoids version conflicts.
+
+---
+
 ## Prior Art
 
 - [Firebase Functions](https://firebase.google.com/docs/functions) - inspiration for DX

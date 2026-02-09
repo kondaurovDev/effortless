@@ -36,9 +36,13 @@ export const buildCommand = Command.make(
       const prodDeps = yield* readProductionDependencies(projectDir).pipe(
         Effect.catchAll(() => Effect.succeed([] as string[]))
       );
-      const external = prodDeps.length > 0
-        ? yield* Effect.promise(() => collectLayerPackages(projectDir, prodDeps))
-        : [];
+      const { packages: external, warnings: layerWarnings } = prodDeps.length > 0
+        ? yield* Effect.sync(() => collectLayerPackages(projectDir, prodDeps))
+        : { packages: [] as string[], warnings: [] as string[] };
+
+      for (const warning of layerWarnings) {
+        yield* Effect.logWarning(`[layer] ${warning}`);
+      }
 
       if (external.length > 0) {
         yield* Console.log(`Using ${external.length} external packages (from layer)\n`);

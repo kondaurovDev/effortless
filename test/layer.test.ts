@@ -174,8 +174,7 @@ describe("layer", () => {
     });
 
     it("should include transitive dependencies", async () => {
-      // Use collectLayerPackages to trace dependencies (uses @vercel/nft)
-      const packages = await collectLayerPackages(tempDir, ["pkg-b"]);
+      const { packages, warnings } = collectLayerPackages(tempDir, ["pkg-b"]);
 
       // pkg-b depends on pkg-c, so pkg-c should be traced
       expect(packages).toContain("pkg-b");
