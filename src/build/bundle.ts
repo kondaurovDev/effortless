@@ -76,9 +76,15 @@ export const bundle = (input: BundleInput & { exportName?: string; external?: st
     return output.text;
   });
 
+export type StaticFile = {
+  content: Buffer;
+  zipPath: string;
+};
+
 export type ZipInput = {
   content: string;
   filename?: string;
+  staticFiles?: StaticFile[];
 };
 
 // Fixed date for deterministic zip (same content = same hash)
@@ -94,8 +100,30 @@ export const zip = (input: ZipInput) =>
     archive.on("error", (err) => resume(Effect.fail(err)));
 
     archive.append(input.content, { name: input.filename ?? "index.mjs", date: FIXED_DATE });
+    if (input.staticFiles) {
+      for (const file of input.staticFiles) {
+        archive.append(file.content, { name: file.zipPath, date: FIXED_DATE });
+      }
+    }
     archive.finalize();
   });
+
+// ============ Static file resolution ============
+
+export const resolveStaticFiles = (globs: string[], projectDir: string): StaticFile[] => {
+  const files: StaticFile[] = [];
+  for (const pattern of globs) {
+    const matches = globSync(pattern, { cwd: projectDir });
+    for (const match of matches) {
+      const absPath = path.join(projectDir, match);
+      files.push({
+        content: fsSync.readFileSync(absPath),
+        zipPath: match
+      });
+    }
+  }
+  return files;
+};
 
 // ============ File discovery ============
 

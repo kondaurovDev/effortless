@@ -1,4 +1,4 @@
-import { Project, SyntaxKind, type ObjectLiteralExpression, type PropertyAssignment, type CallExpression } from "ts-morph";
+import { Project, SyntaxKind, type ObjectLiteralExpression, type PropertyAssignment, type CallExpression, type ArrayLiteralExpression } from "ts-morph";
 
 // ============ Shared utilities ============
 
@@ -7,7 +7,7 @@ const parseSource = (source: string) => {
   return project.createSourceFile("input.ts", source);
 };
 
-const RUNTIME_PROPS = ["onRequest", "onRecord", "onBatchComplete", "onBatch", "context", "schema", "onError", "deps", "params"];
+const RUNTIME_PROPS = ["onRequest", "onRecord", "onBatchComplete", "onBatch", "context", "schema", "onError", "deps", "params", "static"];
 
 const buildConfigWithoutRuntime = (obj: ObjectLiteralExpression): string => {
   const props = obj.getProperties()
@@ -118,6 +118,30 @@ const extractParamEntries = (obj: ObjectLiteralExpression): ParamEntry[] => {
   return entries;
 };
 
+/**
+ * Extract static file glob patterns from the static property of a handler config.
+ * Reads: static: ["src/templates/*.ejs", "src/assets/*.css"]
+ * Returns: ["src/templates/*.ejs", "src/assets/*.css"]
+ */
+const extractStaticGlobs = (obj: ObjectLiteralExpression): string[] => {
+  const staticProp = obj.getProperties().find(p => {
+    if (p.getKind() === SyntaxKind.PropertyAssignment) {
+      return (p as PropertyAssignment).getName() === "static";
+    }
+    return false;
+  });
+
+  if (!staticProp || staticProp.getKind() !== SyntaxKind.PropertyAssignment) return [];
+
+  const init = (staticProp as PropertyAssignment).getInitializer();
+  if (!init || init.getKind() !== SyntaxKind.ArrayLiteralExpression) return [];
+
+  const arrayLiteral = init as ArrayLiteralExpression;
+  return arrayLiteral.getElements()
+    .filter(e => e.getKind() === SyntaxKind.StringLiteral)
+    .map(e => e.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralValue());
+};
+
 // ============ Handler Registry ============
 
 export type HandlerDefinition = {
@@ -151,6 +175,7 @@ export type ExtractedConfig<T = unknown> = {
   hasHandler: boolean;
   depsKeys: string[];
   paramEntries: ParamEntry[];
+  staticGlobs: string[];
 };
 
 export const extractHandlerConfigs = <T>(source: string, type: HandlerType): ExtractedConfig<T>[] => {
@@ -173,7 +198,8 @@ export const extractHandlerConfigs = <T>(source: string, type: HandlerType): Ext
           const hasHandler = handlerProps.some(p => extractPropertyFromObject(objLiteral, p) !== undefined);
           const depsKeys = extractDepsKeys(objLiteral);
           const paramEntries = extractParamEntries(objLiteral);
-          results.push({ exportName: "default", config: configObj, hasHandler, depsKeys, paramEntries });
+          const staticGlobs = extractStaticGlobs(objLiteral);
+          results.push({ exportName: "default", config: configObj, hasHandler, depsKeys, paramEntries, staticGlobs });
         }
       }
     }
@@ -198,7 +224,8 @@ export const extractHandlerConfigs = <T>(source: string, type: HandlerType): Ext
         const hasHandler = handlerProps.some(p => extractPropertyFromObject(objLiteral, p) !== undefined);
         const depsKeys = extractDepsKeys(objLiteral);
         const paramEntries = extractParamEntries(objLiteral);
-        results.push({ exportName: decl.getName(), config: configObj, hasHandler, depsKeys, paramEntries });
+        const staticGlobs = extractStaticGlobs(objLiteral);
+        results.push({ exportName: decl.getName(), config: configObj, hasHandler, depsKeys, paramEntries, staticGlobs });
       }
     });
   });

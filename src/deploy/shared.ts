@@ -11,7 +11,7 @@ import {
   readProductionDependencies,
   collectLayerPackages
 } from "../aws";
-import { bundle, zip, type BundleInput } from "~/build/bundle";
+import { bundle, zip, resolveStaticFiles, type BundleInput } from "~/build/bundle";
 
 // ============ Common types ============
 
@@ -107,6 +107,8 @@ export type DeployCoreLambdaInput = {
   depsEnv?: Record<string, string>;
   /** Additional IAM permissions for deps access */
   depsPermissions?: readonly string[];
+  /** Static file glob patterns to bundle into the Lambda ZIP */
+  staticGlobs?: string[];
 };
 
 export const deployCoreLambda = ({
@@ -121,7 +123,8 @@ export const deployCoreLambda = ({
   layerArn,
   external,
   depsEnv,
-  depsPermissions
+  depsPermissions,
+  staticGlobs
 }: DeployCoreLambdaInput) =>
   Effect.gen(function* () {
     const tagCtx: TagContext = {
@@ -156,7 +159,10 @@ export const deployCoreLambda = ({
       ...(bundleType ? { type: bundleType } : {}),
       ...(external && external.length > 0 ? { external } : {})
     });
-    const code = yield* zip({ content: bundled });
+    const staticFiles = staticGlobs && staticGlobs.length > 0
+      ? resolveStaticFiles(staticGlobs, input.projectDir)
+      : undefined;
+    const code = yield* zip({ content: bundled, staticFiles });
 
     const environment: Record<string, string> = {
       EFF_PROJECT: input.project,

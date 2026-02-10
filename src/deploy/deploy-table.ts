@@ -25,12 +25,13 @@ type DeployTableFunctionInput = {
   external?: string[];
   depsEnv?: Record<string, string>;
   depsPermissions?: readonly string[];
+  staticGlobs?: string[];
 };
 
 const TABLE_DEFAULT_PERMISSIONS = ["dynamodb:*", "logs:*"] as const;
 
 /** @internal */
-export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, depsPermissions }: DeployTableFunctionInput) =>
+export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, depsPermissions, staticGlobs }: DeployTableFunctionInput) =>
   Effect.gen(function* () {
     const { exportName, config } = fn;
     const handlerName = config.name ?? exportName;
@@ -67,7 +68,8 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
       ...(layerArn ? { layerArn } : {}),
       ...(external ? { external } : {}),
       depsEnv: selfEnv,
-      ...(depsPermissions ? { depsPermissions } : {})
+      ...(depsPermissions ? { depsPermissions } : {}),
+      ...(staticGlobs && staticGlobs.length > 0 ? { staticGlobs } : {})
     });
 
     yield* Effect.logInfo("Setting up event source mapping...");

@@ -1,4 +1,6 @@
 import { randomUUID } from "crypto";
+import { readFileSync } from "fs";
+import { join } from "path";
 import type { AnyParamRef } from "~/handlers/param";
 import { createTableClient } from "./table-client";
 import { getParameters } from "./ssm-client";
@@ -67,8 +69,15 @@ export type HandlerRuntime = {
   handlerName: string;
 };
 
+/**
+ * Read a static file bundled into the Lambda ZIP.
+ * Path is relative to project root (matches the glob pattern used in `static`).
+ */
+export const readStatic = (filePath: string): string =>
+  readFileSync(join(process.cwd(), filePath), "utf-8");
+
 export const createHandlerRuntime = (
-  handler: { context?: (...args: any[]) => any; deps?: any; params?: any },
+  handler: { context?: (...args: any[]) => any; deps?: any; params?: any; static?: string[] },
   handlerType: "http" | "table"
 ): HandlerRuntime => {
   const platform = createPlatformClient();
@@ -104,6 +113,7 @@ export const createHandlerRuntime = (
     if (deps) args.deps = deps;
     const params = await getParams();
     if (params) args.params = params;
+    if (handler.static) args.readStatic = readStatic;
     return args;
   };
 

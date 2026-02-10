@@ -4,7 +4,7 @@ import type { TableClient } from "../runtime/table-client";
 import type { AnyParamRef, ResolveParams } from "./param";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyTableHandler = TableHandler<any, any, any, any, any>;
+type AnyTableHandler = TableHandler<any, any, any, any, any, any>;
 
 /** Maps a deps declaration to resolved runtime client types */
 export type ResolveDeps<D> = {
@@ -72,12 +72,13 @@ export type HttpConfig = {
  * @typeParam D - Type of the deps (from deps declaration)
  * @typeParam P - Type of the params (from params declaration)
  */
-export type HttpHandlerFn<T = undefined, C = undefined, D = undefined, P = undefined> =
+export type HttpHandlerFn<T = undefined, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> =
   (args: { req: HttpRequest }
     & ([T] extends [undefined] ? {} : { data: T })
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
     & ([P] extends [undefined] ? {} : { params: ResolveParams<P> })
+    & ([S] extends [undefined] ? {} : { readStatic: (path: string) => string })
   ) => Promise<HttpResponse>;
 
 /**
@@ -101,7 +102,8 @@ export type DefineHttpOptions<
   T = undefined,
   C = undefined,
   D extends Record<string, AnyTableHandler> | undefined = undefined,
-  P extends Record<string, AnyParamRef> | undefined = undefined
+  P extends Record<string, AnyParamRef> | undefined = undefined,
+  S extends string[] | undefined = undefined
 > = HttpConfig & {
   /**
    * Decode/validate function for the request body.
@@ -137,15 +139,20 @@ export type DefineHttpOptions<
    * Typed values are injected into the handler via the `params` argument.
    */
   params?: P;
+  /**
+   * Static file glob patterns to bundle into the Lambda ZIP.
+   * Files are accessible at runtime via the `readStatic` callback argument.
+   */
+  static?: S;
   /** HTTP request handler function */
-  onRequest: HttpHandlerFn<T, C, D, P>;
+  onRequest: HttpHandlerFn<T, C, D, P, S>;
 };
 
 /**
  * Internal handler object created by defineHttp
  * @internal
  */
-export type HttpHandler<T = undefined, C = undefined, D = undefined, P = undefined> = {
+export type HttpHandler<T = undefined, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = {
   readonly __brand: "effortless-http";
   readonly config: HttpConfig;
   readonly schema?: (input: unknown) => T;
@@ -154,7 +161,8 @@ export type HttpHandler<T = undefined, C = undefined, D = undefined, P = undefin
   readonly context?: (...args: any[]) => C | Promise<C>;
   readonly deps?: D;
   readonly params?: P;
-  readonly onRequest: HttpHandlerFn<T, C, D, P>;
+  readonly static?: string[];
+  readonly onRequest: HttpHandlerFn<T, C, D, P, S>;
 };
 
 /**
@@ -203,11 +211,12 @@ export const defineHttp = <
   T = undefined,
   C = undefined,
   D extends Record<string, AnyTableHandler> | undefined = undefined,
-  P extends Record<string, AnyParamRef> | undefined = undefined
+  P extends Record<string, AnyParamRef> | undefined = undefined,
+  S extends string[] | undefined = undefined
 >(
-  options: DefineHttpOptions<T, C, D, P>
-): HttpHandler<T, C, D, P> => {
-  const { onRequest, onError, context, schema, deps, params, ...config } = options;
+  options: DefineHttpOptions<T, C, D, P, S>
+): HttpHandler<T, C, D, P, S> => {
+  const { onRequest, onError, context, schema, deps, params, static: staticFiles, ...config } = options;
   return {
     __brand: "effortless-http",
     config,
@@ -216,6 +225,7 @@ export const defineHttp = <
     ...(context ? { context } : {}),
     ...(deps ? { deps } : {}),
     ...(params ? { params } : {}),
+    ...(staticFiles ? { static: staticFiles } : {}),
     onRequest
-  } as HttpHandler<T, C, D, P>;
+  } as HttpHandler<T, C, D, P, S>;
 };

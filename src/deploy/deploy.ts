@@ -255,6 +255,7 @@ const deployHttpHandlers = (ctx: DeployHttpHandlersInput) =>
           ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
           depsEnv: withPlatform.depsEnv,
           depsPermissions: withPlatform.depsPermissions,
+          ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
         }).pipe(
           Effect.provide(
             Aws.makeClients({
@@ -331,6 +332,7 @@ const deployTableHandlers = (ctx: DeployTableHandlersInput) =>
           ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
           depsEnv: withPlatform.depsEnv,
           depsPermissions: withPlatform.depsPermissions,
+          ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
         }).pipe(
           Effect.provide(
             Aws.makeClients({

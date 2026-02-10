@@ -26,10 +26,11 @@ type DeployLambdaInput = {
   external?: string[];
   depsEnv?: Record<string, string>;
   depsPermissions?: readonly string[];
+  staticGlobs?: string[];
 };
 
 /** @internal */
-export const deployLambda = ({ input, fn, layerArn, external, depsEnv, depsPermissions }: DeployLambdaInput) =>
+export const deployLambda = ({ input, fn, layerArn, external, depsEnv, depsPermissions, staticGlobs }: DeployLambdaInput) =>
   Effect.gen(function* () {
     const { exportName, config } = fn;
     const handlerName = config.name ?? exportName;
@@ -45,7 +46,8 @@ export const deployLambda = ({ input, fn, layerArn, external, depsEnv, depsPermi
       ...(layerArn ? { layerArn } : {}),
       ...(external ? { external } : {}),
       ...(depsEnv ? { depsEnv } : {}),
-      ...(depsPermissions ? { depsPermissions } : {})
+      ...(depsPermissions ? { depsPermissions } : {}),
+      ...(staticGlobs && staticGlobs.length > 0 ? { staticGlobs } : {})
     });
 
     return { exportName, functionArn, config, handlerName };
