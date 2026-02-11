@@ -2,9 +2,12 @@ import type { Permission } from "./permissions";
 import type { TableHandler } from "./define-table";
 import type { TableClient } from "../runtime/table-client";
 import type { AnyParamRef, ResolveParams } from "./param";
+import type { AuthHandler } from "./define-auth";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTableHandler = TableHandler<any, any, any, any, any, any>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyAuthHandler = AuthHandler<any>;
 
 /** Maps a deps declaration to resolved runtime client types */
 export type ResolveDeps<D> = {
@@ -72,13 +75,14 @@ export type HttpConfig = {
  * @typeParam D - Type of the deps (from deps declaration)
  * @typeParam P - Type of the params (from params declaration)
  */
-export type HttpHandlerFn<T = undefined, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> =
+export type HttpHandlerFn<T = undefined, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined, A extends Record<string, string> | undefined = undefined> =
   (args: { req: HttpRequest }
     & ([T] extends [undefined] ? {} : { data: T })
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
     & ([P] extends [undefined] ? {} : { params: ResolveParams<P> })
     & ([S] extends [undefined] ? {} : { readStatic: (path: string) => string })
+    & ([A] extends [undefined] ? {} : { auth: A })
   ) => Promise<HttpResponse>;
 
 /**
@@ -103,7 +107,8 @@ export type DefineHttpOptions<
   C = undefined,
   D extends Record<string, AnyTableHandler> | undefined = undefined,
   P extends Record<string, AnyParamRef> | undefined = undefined,
-  S extends string[] | undefined = undefined
+  S extends string[] | undefined = undefined,
+  A extends Record<string, string> | undefined = undefined
 > = HttpConfig & {
   /**
    * Decode/validate function for the request body.
@@ -144,15 +149,22 @@ export type DefineHttpOptions<
    * Files are accessible at runtime via the `readStatic` callback argument.
    */
   static?: S;
+  /**
+   * Lambda authorizer for protecting this endpoint.
+   * Reference a handler created with `defineAuth()`. API Gateway will invoke
+   * the authorizer before the handler — unauthorized requests never reach onRequest.
+   * The authorizer context is available via the `auth` argument in onRequest.
+   */
+  auth?: AnyAuthHandler;
   /** HTTP request handler function */
-  onRequest: HttpHandlerFn<T, C, D, P, S>;
+  onRequest: HttpHandlerFn<T, C, D, P, S, A>;
 };
 
 /**
  * Internal handler object created by defineHttp
  * @internal
  */
-export type HttpHandler<T = undefined, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = {
+export type HttpHandler<T = undefined, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined, A extends Record<string, string> | undefined = undefined> = {
   readonly __brand: "effortless-http";
   readonly config: HttpConfig;
   readonly schema?: (input: unknown) => T;
@@ -162,7 +174,8 @@ export type HttpHandler<T = undefined, C = undefined, D = undefined, P = undefin
   readonly deps?: D;
   readonly params?: P;
   readonly static?: string[];
-  readonly onRequest: HttpHandlerFn<T, C, D, P, S>;
+  readonly auth?: AnyAuthHandler;
+  readonly onRequest: HttpHandlerFn<T, C, D, P, S, A>;
 };
 
 /**
@@ -212,11 +225,12 @@ export const defineHttp = <
   C = undefined,
   D extends Record<string, AnyTableHandler> | undefined = undefined,
   P extends Record<string, AnyParamRef> | undefined = undefined,
-  S extends string[] | undefined = undefined
+  S extends string[] | undefined = undefined,
+  A extends Record<string, string> | undefined = undefined
 >(
-  options: DefineHttpOptions<T, C, D, P, S>
-): HttpHandler<T, C, D, P, S> => {
-  const { onRequest, onError, context, schema, deps, params, static: staticFiles, ...config } = options;
+  options: DefineHttpOptions<T, C, D, P, S, A>
+): HttpHandler<T, C, D, P, S, A> => {
+  const { onRequest, onError, context, schema, deps, params, static: staticFiles, auth, ...config } = options;
   return {
     __brand: "effortless-http",
     config,
@@ -226,6 +240,7 @@ export const defineHttp = <
     ...(deps ? { deps } : {}),
     ...(params ? { params } : {}),
     ...(staticFiles ? { static: staticFiles } : {}),
+    ...(auth ? { auth } : {}),
     onRequest
-  } as HttpHandler<T, C, D, P, S>;
+  } as HttpHandler<T, C, D, P, S, A>;
 };

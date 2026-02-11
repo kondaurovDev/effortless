@@ -7,7 +7,7 @@ const parseSource = (source: string) => {
   return project.createSourceFile("input.ts", source);
 };
 
-const RUNTIME_PROPS = ["onRequest", "onRecord", "onBatchComplete", "onBatch", "context", "schema", "onError", "deps", "params", "static"];
+const RUNTIME_PROPS = ["onRequest", "onRecord", "onBatchComplete", "onBatch", "context", "schema", "onError", "deps", "params", "static", "auth", "onAuth"];
 
 const buildConfigWithoutRuntime = (obj: ObjectLiteralExpression): string => {
   const props = obj.getProperties()
@@ -142,6 +142,27 @@ const extractStaticGlobs = (obj: ObjectLiteralExpression): string[] => {
     .map(e => e.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralValue());
 };
 
+/**
+ * Extract the auth handler reference from the auth property of a defineHttp config.
+ * Handles: auth: tokenAuth (Identifier reference to an imported defineAuth handler)
+ * Returns the identifier name (e.g., "tokenAuth"), or undefined if no auth.
+ */
+const extractAuthRef = (obj: ObjectLiteralExpression): string | undefined => {
+  const authProp = obj.getProperties().find(p => {
+    if (p.getKind() === SyntaxKind.PropertyAssignment) {
+      return (p as PropertyAssignment).getName() === "auth";
+    }
+    return false;
+  });
+
+  if (!authProp || authProp.getKind() !== SyntaxKind.PropertyAssignment) return undefined;
+
+  const init = (authProp as PropertyAssignment).getInitializer();
+  if (!init || init.getKind() !== SyntaxKind.Identifier) return undefined;
+
+  return init.getText();
+};
+
 // ============ Handler Registry ============
 
 export type HandlerDefinition = {
@@ -163,6 +184,12 @@ export const handlerRegistry = {
     wrapperFn: "wrapTableStream",
     wrapperPath: "~/runtime/wrap-table-stream",
   },
+  auth: {
+    defineFn: "defineAuth",
+    handlerProps: ["onAuth"],
+    wrapperFn: "wrapAuth",
+    wrapperPath: "~/runtime/wrap-auth",
+  },
 } as const;
 
 export type HandlerType = keyof typeof handlerRegistry;
@@ -176,6 +203,7 @@ export type ExtractedConfig<T = unknown> = {
   depsKeys: string[];
   paramEntries: ParamEntry[];
   staticGlobs: string[];
+  authRef?: string;
 };
 
 export const extractHandlerConfigs = <T>(source: string, type: HandlerType): ExtractedConfig<T>[] => {
@@ -199,7 +227,8 @@ export const extractHandlerConfigs = <T>(source: string, type: HandlerType): Ext
           const depsKeys = extractDepsKeys(objLiteral);
           const paramEntries = extractParamEntries(objLiteral);
           const staticGlobs = extractStaticGlobs(objLiteral);
-          results.push({ exportName: "default", config: configObj, hasHandler, depsKeys, paramEntries, staticGlobs });
+          const authRef = extractAuthRef(objLiteral);
+          results.push({ exportName: "default", config: configObj, hasHandler, depsKeys, paramEntries, staticGlobs, ...(authRef ? { authRef } : {}) });
         }
       }
     }
@@ -225,7 +254,8 @@ export const extractHandlerConfigs = <T>(source: string, type: HandlerType): Ext
         const depsKeys = extractDepsKeys(objLiteral);
         const paramEntries = extractParamEntries(objLiteral);
         const staticGlobs = extractStaticGlobs(objLiteral);
-        results.push({ exportName: decl.getName(), config: configObj, hasHandler, depsKeys, paramEntries, staticGlobs });
+        const authRef = extractAuthRef(objLiteral);
+        results.push({ exportName: decl.getName(), config: configObj, hasHandler, depsKeys, paramEntries, staticGlobs, ...(authRef ? { authRef } : {}) });
       }
     });
   });

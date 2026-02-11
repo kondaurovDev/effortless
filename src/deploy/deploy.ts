@@ -5,6 +5,7 @@ import {
   ensureProjectApi,
   addRouteToApi,
   ensureTable,
+  ensureAuthorizer,
   makeTags,
   resolveStage,
   type TagContext,
@@ -14,6 +15,7 @@ import {
 } from "../aws";
 import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "~/build/bundle";
 import type { ParamEntry } from "~/build/handler-registry";
+import type { AuthConfig } from "~/handlers/define-auth";
 
 // Re-export from shared
 export {
@@ -29,10 +31,14 @@ export { deploy, deployAll } from "./deploy-http";
 // Re-export from deploy-table
 export { deployTable, deployAllTables } from "./deploy-table";
 
+// Re-export from deploy-auth
+export { deployAuthLambda, type DeployAuthResult } from "./deploy-auth";
+
 // Import for internal use
 import { type DeployInput, type DeployResult, type DeployTableResult } from "./shared";
 import { deployLambda } from "./deploy-http";
 import { deployTableFunction } from "./deploy-table";
+import { deployAuthLambda, type DeployAuthResult } from "./deploy-auth";
 
 // ============ Layer preparation ============
 
@@ -221,6 +227,7 @@ type DeployHttpHandlersInput = {
   tableNameMap: Map<string, string>;
   platformEnv: Record<string, string>;
   platformPermissions: readonly string[];
+  authorizerMap: Map<string, string>;
 };
 
 const deployHttpHandlers = (ctx: DeployHttpHandlersInput) =>
@@ -265,12 +272,16 @@ const deployHttpHandlers = (ctx: DeployHttpHandlersInput) =>
           )
         );
 
+        // Resolve auth reference to authorizerId
+        const authorizerId = fn.authRef ? ctx.authorizerMap.get(fn.authRef) : undefined;
+
         const { apiUrl: handlerUrl } = yield* addRouteToApi({
           apiId: ctx.apiId,
           region: ctx.input.region,
           functionArn,
           method: config.method,
-          path: config.path
+          path: config.path,
+          ...(authorizerId ? { authorizerId } : {}),
         }).pipe(
           Effect.provide(
             Aws.makeClients({
@@ -281,7 +292,8 @@ const deployHttpHandlers = (ctx: DeployHttpHandlersInput) =>
         );
 
         results.push({ exportName, url: handlerUrl, functionArn });
-        yield* Effect.logInfo(`  ${config.method} ${config.path} → ${config.name}`);
+        const authLabel = authorizerId ? " [auth]" : "";
+        yield* Effect.logInfo(`  ${config.method} ${config.path} → ${config.name}${authLabel}`);
       }
     }
 
@@ -364,6 +376,7 @@ export type DeployProjectResult = {
   apiUrl?: string;
   httpResults: DeployResult[];
   tableResults: DeployTableResult[];
+  authResults: DeployAuthResult[];
 };
 
 export const deployProject = (input: DeployProjectInput) =>
@@ -377,16 +390,18 @@ export const deployProject = (input: DeployProjectInput) =>
 
     yield* Effect.logInfo(`Found ${files.length} file(s) matching patterns`);
 
-    const { httpHandlers, tableHandlers } = discoverHandlers(files);
+    const { httpHandlers, tableHandlers, authHandlers } = discoverHandlers(files);
 
     const totalHttpHandlers = httpHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalTableHandlers = tableHandlers.reduce((acc, h) => acc + h.exports.length, 0);
+    const totalAuthHandlers = authHandlers.reduce((acc, h) => acc + h.exports.length, 0);
 
     if (totalHttpHandlers === 0 && totalTableHandlers === 0) {
       return yield* Effect.fail(new Error("No handlers found in matched files"));
     }
 
-    yield* Effect.logInfo(`Discovered ${totalHttpHandlers} HTTP handler(s) and ${totalTableHandlers} table handler(s)`);
+    const counts = [`${totalHttpHandlers} HTTP`, `${totalTableHandlers} table`, ...(totalAuthHandlers > 0 ? [`${totalAuthHandlers} auth`] : [])];
+    yield* Effect.logInfo(`Discovered ${counts.join(", ")} handler(s)`);
 
     // Build table name map for deps resolution
     const tableNameMap = buildTableNameMap(tableHandlers, input.project, resolveStage(input.stage));
@@ -433,7 +448,65 @@ export const deployProject = (input: DeployProjectInput) =>
       apiUrl = `https://${apiId}.execute-api.${input.region}.amazonaws.com`;
     }
 
-    // Deploy handlers
+    // Deploy auth handlers and create authorizers
+    const authResults: DeployAuthResult[] = [];
+    const authorizerMap = new Map<string, string>();
+
+    if (totalAuthHandlers > 0 && apiId) {
+      yield* Effect.logInfo(`Deploying ${totalAuthHandlers} auth handler(s)...`);
+
+      for (const { file, exports: authExports } of authHandlers) {
+        const deployInput: DeployInput = {
+          projectDir: input.projectDir,
+          file,
+          project: input.project,
+          region: input.region,
+        };
+        if (input.stage) deployInput.stage = input.stage;
+
+        for (const fn of authExports) {
+          const result = yield* deployAuthLambda({
+            input: deployInput,
+            fn,
+            ...(layerArn ? { layerArn } : {}),
+            ...(external.length > 0 ? { external } : {}),
+          }).pipe(
+            Effect.provide(
+              Aws.makeClients({
+                lambda: { region: input.region },
+                iam: { region: input.region },
+              })
+            )
+          );
+
+          authResults.push(result);
+
+          // Create API Gateway authorizer
+          const authConfig = fn.config as AuthConfig;
+          const authorizerName = `${input.project}-${stage}-${result.handlerName}`;
+          const { authorizerId } = yield* ensureAuthorizer({
+            apiId,
+            region: input.region,
+            authorizerName,
+            functionArn: result.functionArn,
+            identitySource: authConfig.identitySource,
+            ttl: authConfig.ttl,
+          }).pipe(
+            Effect.provide(
+              Aws.makeClients({
+                lambda: { region: input.region },
+                apigatewayv2: { region: input.region },
+              })
+            )
+          );
+
+          authorizerMap.set(fn.exportName, authorizerId);
+          yield* Effect.logInfo(`  [auth] ${result.handlerName} → ${authorizerId}`);
+        }
+      }
+    }
+
+    // Deploy HTTP handlers
     const httpResults = apiId
       ? yield* deployHttpHandlers({
           handlers: httpHandlers,
@@ -444,6 +517,7 @@ export const deployProject = (input: DeployProjectInput) =>
           tableNameMap,
           platformEnv,
           platformPermissions: PLATFORM_PERMISSIONS,
+          authorizerMap,
         })
       : [];
 
@@ -461,5 +535,5 @@ export const deployProject = (input: DeployProjectInput) =>
       yield* Effect.logInfo(`Deployment complete! API: ${apiUrl}`);
     }
 
-    return { apiId, apiUrl, httpResults, tableResults };
+    return { apiId, apiUrl, httpResults, tableResults, authResults };
   });

@@ -14,6 +14,10 @@ export type { EnsureTableInput, EnsureTableResult, EnsureEventSourceMappingInput
 export { ensureProjectApi, addRouteToApi, deleteApi } from "./apigateway";
 export type { ProjectApiConfig, RouteConfig, HttpMethod } from "./apigateway";
 
+// Authorizer
+export { ensureAuthorizer, deleteAuthorizer } from "./authorizer";
+export type { AuthorizerConfig } from "./authorizer";
+
 // Layer
 export { ensureLayer, readProductionDependencies, computeLockfileHash, collectLayerPackages, listLayerVersions, deleteAllLayerVersions, deleteLayerVersion } from "./layer";
 export type { LayerConfig, LayerResult, LayerVersionInfo } from "./layer";

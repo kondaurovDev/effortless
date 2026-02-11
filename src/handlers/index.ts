@@ -30,5 +30,16 @@ export type {
 // Table client
 export type { TableClient, QueryParams } from "../runtime/table-client";
 
+// Auth handlers
+export { defineAuth } from "./define-auth";
+export type {
+  AuthConfig,
+  AuthHandler,
+  AuthRequest,
+  AuthResponse,
+  AuthHandlerFn,
+  DefineAuthOptions
+} from "./define-auth";
+
 // Permissions
 export type { Permission } from "./permissions";

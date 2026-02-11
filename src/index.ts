@@ -5,11 +5,13 @@ export type { EffortlessConfig } from "./config"
 // Handlers
 export { defineHttp } from "./handlers/define-http"
 export { defineTable } from "./handlers/define-table"
+export { defineAuth } from "./handlers/define-auth"
 export { param } from "./handlers/param"
 
 // Types
 export type { HttpConfig, HttpRequest, HttpResponse, HttpMethod, HttpHandler, HttpHandlerFn, DefineHttpOptions, ResolveDeps } from "./handlers/define-http"
 export type { TableConfig, TableRecord, TableHandler, TableKey, KeyType, StreamView, DefineTableOptions, TableRecordFn, TableBatchFn, TableBatchCompleteFn, FailedRecord } from "./handlers/define-table"
+export type { AuthConfig, AuthHandler, AuthRequest, AuthResponse, AuthHandlerFn, DefineAuthOptions } from "./handlers/define-auth"
 export type { TableClient, QueryParams } from "./runtime/table-client"
 export type { ParamRef, ResolveParams } from "./handlers/param"
 

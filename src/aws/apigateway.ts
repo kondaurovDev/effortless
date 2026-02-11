@@ -17,6 +17,7 @@ export type RouteConfig = {
   functionArn: string;
   method: HttpMethod;
   path: string;
+  authorizerId?: string;
 };
 
 export const ensureProjectApi = (config: ProjectApiConfig) =>
@@ -101,10 +102,24 @@ export const addRouteToApi = (config: RouteConfig) =>
       yield* apigatewayv2.make("create_route", {
         ApiId: config.apiId,
         RouteKey: routeKey,
-        Target: `integrations/${integrationId}`
+        Target: `integrations/${integrationId}`,
+        ...(config.authorizerId ? {
+          AuthorizerId: config.authorizerId,
+          AuthorizationType: "CUSTOM",
+        } : {}),
       });
     } else {
       yield* Effect.logDebug(`Route already exists: ${routeKey}`);
+
+      // Update route if authorizerId needs to be set or changed
+      if (config.authorizerId && existingRoute.AuthorizerId !== config.authorizerId) {
+        yield* apigatewayv2.make("update_route", {
+          ApiId: config.apiId,
+          RouteId: existingRoute.RouteId!,
+          AuthorizerId: config.authorizerId,
+          AuthorizationType: "CUSTOM",
+        });
+      }
     }
 
     // Add Lambda permission

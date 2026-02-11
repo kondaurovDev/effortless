@@ -13,7 +13,10 @@ const parseBody = (body: string | undefined, isBase64: boolean): unknown => {
 };
 
 type LambdaEvent = {
-  requestContext?: { http?: { method?: string; path?: string } };
+  requestContext?: {
+    http?: { method?: string; path?: string };
+    authorizer?: { lambda?: Record<string, string> };
+  };
   httpMethod?: string;
   path?: string;
   headers?: Record<string, string>;
@@ -79,6 +82,12 @@ export const wrapHttp = <T, C>(handler: HttpHandler<T, C>) => {
 
     // Resolve shared args
     Object.assign(args, await rt.commonArgs());
+
+    // Inject auth context from API Gateway Lambda authorizer
+    const authContext = event.requestContext?.authorizer?.lambda;
+    if (authContext) {
+      args.auth = authContext;
+    }
 
     try {
       const response = await (handler.onRequest as any)(args);

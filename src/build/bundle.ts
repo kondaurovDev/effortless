@@ -8,6 +8,7 @@ import { globSync } from "glob";
 import { generateEntryPoint, extractHandlerConfigs, type HandlerType, type ExtractedConfig } from "./handler-registry";
 import type { HttpConfig } from "~/handlers/define-http";
 import type { TableConfig } from "~/handlers/define-table";
+import type { AuthConfig } from "~/handlers/define-auth";
 
 export type BundleInput = {
   projectDir: string;
@@ -19,12 +20,16 @@ export type BundleInput = {
 
 export type ExtractedFunction = ExtractedConfig<HttpConfig>;
 export type ExtractedTableFunction = ExtractedConfig<TableConfig>;
+export type ExtractedAuthFunction = ExtractedConfig<AuthConfig>;
 
 export const extractConfigs = (source: string): ExtractedFunction[] =>
   extractHandlerConfigs<HttpConfig>(source, "http");
 
 export const extractTableConfigs = (source: string): ExtractedTableFunction[] =>
   extractHandlerConfigs<TableConfig>(source, "table");
+
+export const extractAuthConfigs = (source: string): ExtractedAuthFunction[] =>
+  extractHandlerConfigs<AuthConfig>(source, "auth");
 
 export const extractConfig = (source: string): HttpConfig | null => {
   const configs = extractConfigs(source);
@@ -139,11 +144,13 @@ export const findHandlerFiles = (patterns: string[], cwd: string): string[] => {
 export type DiscoveredHandlers = {
   httpHandlers: { file: string; exports: ExtractedFunction[] }[];
   tableHandlers: { file: string; exports: ExtractedTableFunction[] }[];
+  authHandlers: { file: string; exports: ExtractedAuthFunction[] }[];
 };
 
 export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
   const httpHandlers: { file: string; exports: ExtractedFunction[] }[] = [];
   const tableHandlers: { file: string; exports: ExtractedTableFunction[] }[] = [];
+  const authHandlers: { file: string; exports: ExtractedAuthFunction[] }[] = [];
 
   for (const file of files) {
     // Skip directories
@@ -152,10 +159,12 @@ export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
     const source = fsSync.readFileSync(file, "utf-8");
     const http = extractConfigs(source);
     const table = extractTableConfigs(source);
+    const auth = extractAuthConfigs(source);
 
     if (http.length > 0) httpHandlers.push({ file, exports: http });
     if (table.length > 0) tableHandlers.push({ file, exports: table });
+    if (auth.length > 0) authHandlers.push({ file, exports: auth });
   }
 
-  return { httpHandlers, tableHandlers };
+  return { httpHandlers, tableHandlers, authHandlers };
 };
