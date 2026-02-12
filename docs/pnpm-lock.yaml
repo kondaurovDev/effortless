@@ -15,8 +15,8 @@ importers:
         specifier: ^5.0.0
         version: 5.17.2(rollup@4.57.1)(typescript@5.9.3)
       effortless-aws:
-        specifier: ^0.3.0
-        version: 0.3.0
+        specifier: ^0.4.0
+        version: 0.4.0
       sharp:
         specifier: ^0.33.0
         version: 0.33.5
@@ -1612,8 +1612,8 @@ packages:
   eastasianwidth@0.2.0:
     resolution: {integrity: sha512-I88TYZWc9XiYHRQ4/3c5rjjfgkjhLyW2luGIheGERbNQ6OY7yTybanSpDXZa8y7VUP9YmDcYa+eyq4ca7iLqWA==}
 
-  effortless-aws@0.3.0:
-    resolution: {integrity: sha512-qbo5FifacGTzdA185fNfMlrLPP4BZY2KKBZYCVSwQLsRAibMUaNgk3deCiQYbVIC14AajrXino7COOKJ26+zMA==}
+  effortless-aws@0.4.0:
+    resolution: {integrity: sha512-WJfcha//QJiKr8MPjrIpUFD5C3LFqe/dCTA80sKsa8gu6a7Nee3mH7+uuxvuyqpm3dhVOeeZJ7XHVK1Q4vtxJA==}
     hasBin: true
 
   emoji-regex-xs@1.0.0:
@@ -4851,7 +4851,7 @@ snapshots:
 
   eastasianwidth@0.2.0: {}
 
-  effortless-aws@0.3.0:
+  effortless-aws@0.4.0:
     dependencies:
       '@aws-sdk/client-apigatewayv2': 3.988.0
       '@aws-sdk/client-dynamodb': 3.988.0

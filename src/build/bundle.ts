@@ -118,7 +118,7 @@ export const zip = (input: ZipInput) =>
 export const resolveStaticFiles = (globs: string[], projectDir: string): StaticFile[] => {
   const files: StaticFile[] = [];
   for (const pattern of globs) {
-    const matches = globSync(pattern, { cwd: projectDir });
+    const matches = globSync(pattern, { cwd: projectDir, nodir: true });
     for (const match of matches) {
       const absPath = path.join(projectDir, match);
       files.push({

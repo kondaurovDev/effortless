@@ -165,6 +165,28 @@ describe("resolveStaticFiles", () => {
     expect(files).toHaveLength(0);
   });
 
+  it("should resolve recursive glob skipping directories", () => {
+    const files = resolveStaticFiles(["test/fixtures/site/**/*"], projectDir);
+
+    const paths = files.map(f => f.zipPath).sort();
+
+    // must contain files from root and nested assets/ dir
+    expect(paths).toContain("test/fixtures/site/index.html");
+    expect(paths).toContain("test/fixtures/site/app.js");
+    expect(paths).toContain("test/fixtures/site/style.css");
+    expect(paths).toContain("test/fixtures/site/assets/main.css");
+    expect(paths).toContain("test/fixtures/site/assets/main.js");
+
+    // must NOT contain the directory itself
+    expect(paths).not.toContain("test/fixtures/site/assets");
+
+    // every entry must be a readable Buffer
+    for (const f of files) {
+      expect(Buffer.isBuffer(f.content)).toBe(true);
+      expect(f.content.length).toBeGreaterThan(0);
+    }
+  });
+
 });
 
 // ============ zip with static files ============
