@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.4.0
+
+### Minor Changes
+
+- [`ec4daa0`](https://github.com/kondaurovDev/effortless-aws/commit/ec4daa098fe5501f7cf8ca149413bf2fb79e894f) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Add `defineSite` handler for serving static web content via Lambda and `contentType` shorthand for `defineHttp` responses
+
 ## 0.3.0
 
 ### Minor Changes
