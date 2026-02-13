@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest"
 import * as path from "path"
 
-import { extractSiteConfigs } from "~/build/bundle"
-import { buildSiteRoutePaths } from "~/deploy/deploy"
+import { extractAppConfigs } from "~/build/bundle"
+import { buildAppRoutePaths } from "~/deploy/deploy"
 import { importBundle } from "./helpers/bundle-code"
 
 const projectDir = path.resolve(__dirname, "..")
@@ -17,30 +17,30 @@ const makeEvent = (file?: string) => ({
 
 // ============ AST extraction ============
 
-describe("defineSite extraction", () => {
+describe("defineApp extraction", () => {
 
-  it("should extract site config from named export", () => {
+  it("should extract app config from named export", () => {
     const source = `
-      import { defineSite } from "effortless-aws";
+      import { defineApp } from "effortless-aws";
 
-      export const app = defineSite({
+      export const app = defineApp({
         path: "/app",
         dir: "src/webapp",
       });
     `;
 
-    const configs = extractSiteConfigs(source);
+    const configs = extractAppConfigs(source);
 
     expect(configs).toHaveLength(1);
     expect(configs[0]!.exportName).toBe("app");
     expect(configs[0]!.config).toEqual({ path: "/app", dir: "src/webapp" });
   });
 
-  it("should extract site config from default export", () => {
+  it("should extract app config from default export", () => {
     const source = `
-      import { defineSite } from "effortless-aws";
+      import { defineApp } from "effortless-aws";
 
-      export default defineSite({
+      export default defineApp({
         name: "webapp",
         path: "/",
         dir: "dist",
@@ -49,7 +49,7 @@ describe("defineSite extraction", () => {
       });
     `;
 
-    const configs = extractSiteConfigs(source);
+    const configs = extractAppConfigs(source);
 
     expect(configs).toHaveLength(1);
     expect(configs[0]!.exportName).toBe("default");
@@ -64,9 +64,9 @@ describe("defineSite extraction", () => {
 
   it("should preserve dir, index, and spa in config (not stripped as runtime props)", () => {
     const source = `
-      import { defineSite } from "effortless-aws";
+      import { defineApp } from "effortless-aws";
 
-      export const app = defineSite({
+      export const app = defineApp({
         path: "/app",
         dir: "public",
         index: "main.html",
@@ -74,7 +74,7 @@ describe("defineSite extraction", () => {
       });
     `;
 
-    const configs = extractSiteConfigs(source);
+    const configs = extractAppConfigs(source);
 
     expect(configs[0]!.config).toHaveProperty("dir", "public");
     expect(configs[0]!.config).toHaveProperty("index", "main.html");
@@ -83,15 +83,15 @@ describe("defineSite extraction", () => {
 
   it("should have empty deps, params, and static globs", () => {
     const source = `
-      import { defineSite } from "effortless-aws";
+      import { defineApp } from "effortless-aws";
 
-      export const app = defineSite({
+      export const app = defineApp({
         path: "/app",
         dir: "src/webapp",
       });
     `;
 
-    const configs = extractSiteConfigs(source);
+    const configs = extractAppConfigs(source);
 
     expect(configs[0]!.depsKeys).toEqual([]);
     expect(configs[0]!.paramEntries).toEqual([]);
@@ -100,18 +100,32 @@ describe("defineSite extraction", () => {
 
   it("should extract build command in config", () => {
     const source = `
-      import { defineSite } from "effortless-aws";
+      import { defineApp } from "effortless-aws";
 
-      export const app = defineSite({
+      export const app = defineApp({
         path: "/app",
         dir: "dist",
         build: "npx astro build",
       });
     `;
 
-    const configs = extractSiteConfigs(source);
+    const configs = extractAppConfigs(source);
 
     expect(configs[0]!.config).toHaveProperty("build", "npx astro build");
+  });
+
+  it("should not match defineStaticSite calls", () => {
+    const source = `
+      import { defineStaticSite } from "effortless-aws";
+
+      export const docs = defineStaticSite({
+        dir: "dist",
+        build: "npm run build",
+      });
+    `;
+
+    const configs = extractAppConfigs(source);
+    expect(configs).toHaveLength(0);
   });
 
   it("should not match defineHttp or defineTable calls", () => {
@@ -125,7 +139,7 @@ describe("defineSite extraction", () => {
       });
     `;
 
-    const configs = extractSiteConfigs(source);
+    const configs = extractAppConfigs(source);
     expect(configs).toHaveLength(0);
   });
 
@@ -133,34 +147,34 @@ describe("defineSite extraction", () => {
 
 // ============ Route path resolution ============
 
-describe("buildSiteRoutePaths", () => {
+describe("buildAppRoutePaths", () => {
 
   it("root path: / → GET / and GET /{file+}", () => {
-    const [root, greedy] = buildSiteRoutePaths("/");
+    const [root, greedy] = buildAppRoutePaths("/");
     expect(root).toBe("/");
     expect(greedy).toBe("/{file+}");
   });
 
   it("subpath: /app → GET /app and GET /app/{file+}", () => {
-    const [root, greedy] = buildSiteRoutePaths("/app");
+    const [root, greedy] = buildAppRoutePaths("/app");
     expect(root).toBe("/app");
     expect(greedy).toBe("/app/{file+}");
   });
 
   it("trailing slash: /app/ → GET /app and GET /app/{file+}", () => {
-    const [root, greedy] = buildSiteRoutePaths("/app/");
+    const [root, greedy] = buildAppRoutePaths("/app/");
     expect(root).toBe("/app");
     expect(greedy).toBe("/app/{file+}");
   });
 
   it("nested path: /docs/v2 → GET /docs/v2 and GET /docs/v2/{file+}", () => {
-    const [root, greedy] = buildSiteRoutePaths("/docs/v2");
+    const [root, greedy] = buildAppRoutePaths("/docs/v2");
     expect(root).toBe("/docs/v2");
     expect(greedy).toBe("/docs/v2/{file+}");
   });
 
   it("no double slashes in greedy path for root", () => {
-    const [, greedy] = buildSiteRoutePaths("/");
+    const [, greedy] = buildAppRoutePaths("/");
     expect(greedy).not.toContain("//");
   });
 
@@ -168,19 +182,19 @@ describe("buildSiteRoutePaths", () => {
 
 // ============ Runtime ============
 
-describe("wrapSite runtime", () => {
+describe("wrapApp runtime", () => {
 
   it("should serve index.html at root path", async () => {
     const handlerCode = `
-      import { defineSite } from "./src/handlers/define-site";
+      import { defineApp } from "./src/handlers/define-app";
 
-      export default defineSite({
+      export default defineApp({
         path: "/app",
         dir: "test/fixtures/site",
       });
     `;
 
-    const mod = await importBundle({ code: handlerCode, projectDir, type: "site" });
+    const mod = await importBundle({ code: handlerCode, projectDir, type: "app" });
     const response = await mod.handler(makeEvent());
 
     expect(response.statusCode).toBe(200);
@@ -190,15 +204,15 @@ describe("wrapSite runtime", () => {
 
   it("should serve CSS with correct content-type", async () => {
     const handlerCode = `
-      import { defineSite } from "./src/handlers/define-site";
+      import { defineApp } from "./src/handlers/define-app";
 
-      export default defineSite({
+      export default defineApp({
         path: "/app",
         dir: "test/fixtures/site",
       });
     `;
 
-    const mod = await importBundle({ code: handlerCode, projectDir, type: "site" });
+    const mod = await importBundle({ code: handlerCode, projectDir, type: "app" });
     const response = await mod.handler(makeEvent("style.css"));
 
     expect(response.statusCode).toBe(200);
@@ -208,15 +222,15 @@ describe("wrapSite runtime", () => {
 
   it("should serve JS with correct content-type", async () => {
     const handlerCode = `
-      import { defineSite } from "./src/handlers/define-site";
+      import { defineApp } from "./src/handlers/define-app";
 
-      export default defineSite({
+      export default defineApp({
         path: "/app",
         dir: "test/fixtures/site",
       });
     `;
 
-    const mod = await importBundle({ code: handlerCode, projectDir, type: "site" });
+    const mod = await importBundle({ code: handlerCode, projectDir, type: "app" });
     const response = await mod.handler(makeEvent("app.js"));
 
     expect(response.statusCode).toBe(200);
@@ -226,15 +240,15 @@ describe("wrapSite runtime", () => {
 
   it("should return 404 for missing files", async () => {
     const handlerCode = `
-      import { defineSite } from "./src/handlers/define-site";
+      import { defineApp } from "./src/handlers/define-app";
 
-      export default defineSite({
+      export default defineApp({
         path: "/app",
         dir: "test/fixtures/site",
       });
     `;
 
-    const mod = await importBundle({ code: handlerCode, projectDir, type: "site" });
+    const mod = await importBundle({ code: handlerCode, projectDir, type: "app" });
     const response = await mod.handler(makeEvent("nonexistent.html"));
 
     expect(response.statusCode).toBe(404);
@@ -243,15 +257,15 @@ describe("wrapSite runtime", () => {
 
   it("should block path traversal", async () => {
     const handlerCode = `
-      import { defineSite } from "./src/handlers/define-site";
+      import { defineApp } from "./src/handlers/define-app";
 
-      export default defineSite({
+      export default defineApp({
         path: "/app",
         dir: "test/fixtures/site",
       });
     `;
 
-    const mod = await importBundle({ code: handlerCode, projectDir, type: "site" });
+    const mod = await importBundle({ code: handlerCode, projectDir, type: "app" });
     const response = await mod.handler(makeEvent("../../package.json"));
 
     expect(response.statusCode).toBe(403);
@@ -260,16 +274,16 @@ describe("wrapSite runtime", () => {
 
   it("should serve index.html in SPA mode for non-file paths", async () => {
     const handlerCode = `
-      import { defineSite } from "./src/handlers/define-site";
+      import { defineApp } from "./src/handlers/define-app";
 
-      export default defineSite({
+      export default defineApp({
         path: "/app",
         dir: "test/fixtures/site",
         spa: true,
       });
     `;
 
-    const mod = await importBundle({ code: handlerCode, projectDir, type: "site" });
+    const mod = await importBundle({ code: handlerCode, projectDir, type: "app" });
     const response = await mod.handler(makeEvent("dashboard/settings"));
 
     expect(response.statusCode).toBe(200);
@@ -279,15 +293,15 @@ describe("wrapSite runtime", () => {
 
   it("should return 404 in non-SPA mode for non-file paths", async () => {
     const handlerCode = `
-      import { defineSite } from "./src/handlers/define-site";
+      import { defineApp } from "./src/handlers/define-app";
 
-      export default defineSite({
+      export default defineApp({
         path: "/app",
         dir: "test/fixtures/site",
       });
     `;
 
-    const mod = await importBundle({ code: handlerCode, projectDir, type: "site" });
+    const mod = await importBundle({ code: handlerCode, projectDir, type: "app" });
     const response = await mod.handler(makeEvent("dashboard/settings"));
 
     expect(response.statusCode).toBe(404);
@@ -295,15 +309,15 @@ describe("wrapSite runtime", () => {
 
   it("should set cache-control headers", async () => {
     const handlerCode = `
-      import { defineSite } from "./src/handlers/define-site";
+      import { defineApp } from "./src/handlers/define-app";
 
-      export default defineSite({
+      export default defineApp({
         path: "/app",
         dir: "test/fixtures/site",
       });
     `;
 
-    const mod = await importBundle({ code: handlerCode, projectDir, type: "site" });
+    const mod = await importBundle({ code: handlerCode, projectDir, type: "app" });
 
     const htmlRes = await mod.handler(makeEvent("index.html"));
     expect(htmlRes.headers["Cache-Control"]).toBe("public, max-age=0, must-revalidate");

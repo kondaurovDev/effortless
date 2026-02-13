@@ -1,12 +1,14 @@
 ---
 title: Handlers
-description: All handler types — defineHttp, defineTable, defineQueue, defineSchedule, defineEvent, defineS3.
+description: All handler types — defineHttp, defineTable, defineApp, defineStaticSite, defineQueue, defineSchedule, defineEvent, defineS3.
 ---
 
 | Handler | Status |
 |---------|--------|
 | [defineHttp](#definehttp) | Available |
 | [defineTable](#definetable) | Available |
+| [defineApp](#defineapp) | Available |
+| [defineStaticSite](#definestaticsite) | Available |
 | [defineQueue](#definequeue) | Planned |
 | [defineSchedule](#defineschedule) | Planned |
 | [defineEvent](#defineevent) | Planned |
@@ -245,6 +247,96 @@ export const users = defineTable({
 - **Cold start optimization** — the `context` factory runs once and is cached across invocations.
 - **Progressive complexity** — omit handlers for table-only. Add `onRecord` for stream processing. Add `onBatch` for batch mode. Add `deps` for cross-table access.
 - **Auto-infrastructure** — DynamoDB table, stream, Lambda, event source mapping, and IAM permissions are all created on deploy from this single definition.
+
+---
+
+## defineApp
+
+Creates: API Gateway HTTP API + Lambda serving static files.
+
+```typescript
+export const app = defineApp({
+  // Required
+  dir: string,                       // directory with built site files
+
+  // Optional
+  name?: string,                     // defaults to export name
+  path?: string,                     // base URL path (e.g. "/app")
+  index?: string,                    // default: "index.html"
+  spa?: boolean,                     // SPA mode: serve index for all paths (default: false)
+  build?: string,                    // shell command to run before deploy
+  memory?: number,                   // Lambda memory in MB (default: 256)
+  timeout?: number,                  // Lambda timeout in seconds (default: 5)
+});
+```
+
+Files are bundled into the Lambda ZIP. The runtime serves them with auto-detected content types, cache headers, and path traversal protection.
+
+```typescript
+export const app = defineApp({
+  dir: "dist",
+  path: "/app",
+  build: "npm run build",
+});
+```
+
+- HTML files: `Cache-Control: public, max-age=0, must-revalidate`
+- Other files (JS, CSS, images): `Cache-Control: public, max-age=31536000, immutable`
+
+When `spa: true`, all paths that don't match a file are served with `index.html`. This enables client-side routing (React Router, Vue Router, etc.).
+
+**Built-in best practices**:
+- **Content-type detection** — auto-detected from file extensions (HTML, CSS, JS, images, fonts, etc.).
+- **Cache headers** — HTML files are revalidated on every request; hashed assets are cached for 1 year.
+- **Path traversal protection** — requests attempting `../` traversal are blocked with 403.
+- **SPA support** — when `spa: true`, returns `index.html` for paths without file extensions.
+- **Auto-infrastructure** — API Gateway HTTP API, route, Lambda integration, and IAM permissions are created on deploy.
+
+For CDN-backed sites (S3 + CloudFront), use [defineStaticSite](#definestaticsite) instead.
+
+---
+
+## defineStaticSite
+
+Creates: S3 bucket + CloudFront distribution + Origin Access Control.
+
+```typescript
+export const docs = defineStaticSite({
+  // Required
+  dir: string,                       // directory with built site files
+
+  // Optional
+  name?: string,                     // defaults to export name
+  index?: string,                    // default: "index.html"
+  spa?: boolean,                     // SPA mode: serve index for all paths (default: false)
+  build?: string,                    // shell command to run before deploy
+});
+```
+
+Files are synced to S3 and served via CloudFront globally.
+
+```typescript
+export const docs = defineStaticSite({
+  dir: "dist",
+  build: "npx astro build",
+});
+```
+
+When `spa: true`, CloudFront error responses redirect 403/404 to `index.html`, enabling client-side routing (React Router, Vue Router, etc.).
+
+```typescript
+export const dashboard = defineStaticSite({
+  dir: "dist",
+  spa: true,
+  build: "npm run build",
+});
+```
+
+**Built-in best practices**:
+- **URL rewriting** — automatically resolves `/path/` to `/path/index.html` via CloudFront Function.
+- **SPA support** — when `spa: true`, 403/404 errors return `index.html` for client-side routing.
+- **Global distribution** — served via CloudFront edge locations worldwide.
+- **Auto-infrastructure** — S3 bucket, CloudFront distribution, Origin Access Control, and cache invalidation on deploy.
 
 ---
 

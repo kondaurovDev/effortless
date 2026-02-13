@@ -163,11 +163,17 @@ export const handlerRegistry = {
     wrapperFn: "wrapTableStream",
     wrapperPath: "~/runtime/wrap-table-stream",
   },
-  site: {
-    defineFn: "defineSite",
+  app: {
+    defineFn: "defineApp",
     handlerProps: [],
-    wrapperFn: "wrapSite",
-    wrapperPath: "~/runtime/wrap-site",
+    wrapperFn: "wrapApp",
+    wrapperPath: "~/runtime/wrap-app",
+  },
+  staticSite: {
+    defineFn: "defineStaticSite",
+    handlerProps: [],
+    wrapperFn: "",
+    wrapperPath: "",
   },
 } as const;
 

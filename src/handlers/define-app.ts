@@ -1,11 +1,11 @@
 /**
- * Configuration for a static site handler (serializable, extracted at build time)
+ * Configuration for a Lambda-served static site (API Gateway + Lambda)
  */
-export type SiteConfig = {
+export type AppConfig = {
   /** Handler name. Defaults to export name if not specified */
   name?: string;
   /** Base URL path the site is served under (e.g., "/app") */
-  path: string;
+  path?: string;
   /** Directory containing the static site files, relative to project root */
   dir: string;
   /** Default file for directory requests (default: "index.html") */
@@ -23,39 +23,32 @@ export type SiteConfig = {
 };
 
 /**
- * Internal handler object created by defineSite
+ * Internal handler object created by defineApp
  * @internal
  */
-export type SiteHandler = {
-  readonly __brand: "effortless-site";
-  readonly config: SiteConfig;
+export type AppHandler = {
+  readonly __brand: "effortless-app";
+  readonly config: AppConfig;
 };
 
 /**
- * Define a static site endpoint that serves files from a directory via Lambda
+ * Deploy a static site via Lambda + API Gateway.
+ * Files are bundled into the Lambda ZIP and served with auto-detected content types.
+ *
+ * For CDN-backed sites (S3 + CloudFront), use {@link defineStaticSite} instead.
  *
  * @param options - Site configuration: path, directory, optional SPA mode
  * @returns Handler object used by the deployment system
  *
  * @example Basic static site
  * ```typescript
- * export const app = defineSite({
+ * export const app = defineApp({
  *   path: "/app",
  *   dir: "src/webapp",
  * });
  * ```
- *
- * @example Astro site with build step
- * ```typescript
- * export const dashboard = defineSite({
- *   path: "/dashboard",
- *   dir: "dist",
- *   build: "npx astro build",
- *   spa: true,
- * });
- * ```
  */
-export const defineSite = (options: SiteConfig): SiteHandler => ({
-  __brand: "effortless-site",
+export const defineApp = (options: AppConfig): AppHandler => ({
+  __brand: "effortless-app",
   config: options,
 });

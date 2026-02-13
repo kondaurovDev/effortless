@@ -8,7 +8,8 @@ import { globSync } from "glob";
 import { generateEntryPoint, extractHandlerConfigs, type HandlerType, type ExtractedConfig } from "./handler-registry";
 import type { HttpConfig } from "~/handlers/define-http";
 import type { TableConfig } from "~/handlers/define-table";
-import type { SiteConfig } from "~/handlers/define-site";
+import type { AppConfig } from "~/handlers/define-app";
+import type { StaticSiteConfig } from "~/handlers/define-static-site";
 
 export type BundleInput = {
   projectDir: string;
@@ -20,7 +21,8 @@ export type BundleInput = {
 
 export type ExtractedFunction = ExtractedConfig<HttpConfig>;
 export type ExtractedTableFunction = ExtractedConfig<TableConfig>;
-export type ExtractedSiteFunction = ExtractedConfig<SiteConfig>;
+export type ExtractedAppFunction = ExtractedConfig<AppConfig>;
+export type ExtractedStaticSiteFunction = ExtractedConfig<StaticSiteConfig>;
 
 export const extractConfigs = (source: string): ExtractedFunction[] =>
   extractHandlerConfigs<HttpConfig>(source, "http");
@@ -28,8 +30,11 @@ export const extractConfigs = (source: string): ExtractedFunction[] =>
 export const extractTableConfigs = (source: string): ExtractedTableFunction[] =>
   extractHandlerConfigs<TableConfig>(source, "table");
 
-export const extractSiteConfigs = (source: string): ExtractedSiteFunction[] =>
-  extractHandlerConfigs<SiteConfig>(source, "site");
+export const extractAppConfigs = (source: string): ExtractedAppFunction[] =>
+  extractHandlerConfigs<AppConfig>(source, "app");
+
+export const extractStaticSiteConfigs = (source: string): ExtractedStaticSiteFunction[] =>
+  extractHandlerConfigs<StaticSiteConfig>(source, "staticSite");
 
 export const extractConfig = (source: string): HttpConfig | null => {
   const configs = extractConfigs(source);
@@ -144,13 +149,15 @@ export const findHandlerFiles = (patterns: string[], cwd: string): string[] => {
 export type DiscoveredHandlers = {
   httpHandlers: { file: string; exports: ExtractedFunction[] }[];
   tableHandlers: { file: string; exports: ExtractedTableFunction[] }[];
-  siteHandlers: { file: string; exports: ExtractedSiteFunction[] }[];
+  appHandlers: { file: string; exports: ExtractedAppFunction[] }[];
+  staticSiteHandlers: { file: string; exports: ExtractedStaticSiteFunction[] }[];
 };
 
 export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
   const httpHandlers: { file: string; exports: ExtractedFunction[] }[] = [];
   const tableHandlers: { file: string; exports: ExtractedTableFunction[] }[] = [];
-  const siteHandlers: { file: string; exports: ExtractedSiteFunction[] }[] = [];
+  const appHandlers: { file: string; exports: ExtractedAppFunction[] }[] = [];
+  const staticSiteHandlers: { file: string; exports: ExtractedStaticSiteFunction[] }[] = [];
 
   for (const file of files) {
     // Skip directories
@@ -159,12 +166,14 @@ export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
     const source = fsSync.readFileSync(file, "utf-8");
     const http = extractConfigs(source);
     const table = extractTableConfigs(source);
-    const site = extractSiteConfigs(source);
+    const app = extractAppConfigs(source);
+    const staticSite = extractStaticSiteConfigs(source);
 
     if (http.length > 0) httpHandlers.push({ file, exports: http });
     if (table.length > 0) tableHandlers.push({ file, exports: table });
-    if (site.length > 0) siteHandlers.push({ file, exports: site });
+    if (app.length > 0) appHandlers.push({ file, exports: app });
+    if (staticSite.length > 0) staticSiteHandlers.push({ file, exports: staticSite });
   }
 
-  return { httpHandlers, tableHandlers, siteHandlers };
+  return { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers };
 };

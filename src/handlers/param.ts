@@ -47,11 +47,15 @@ export type ResolveParams<P> = {
  * }
  * ```
  */
-export const param = <T = string>(
+export function param(key: string): ParamRef<string>;
+export function param<T>(key: string, transform: (raw: string) => T): ParamRef<T>;
+export function param<T = string>(
   key: string,
   transform?: (raw: string) => T
-): ParamRef<T> => ({
-  __brand: "effortless-param",
-  key,
-  ...(transform ? { transform } : {}),
-});
+): ParamRef<T> {
+  return {
+    __brand: "effortless-param",
+    key,
+    ...(transform ? { transform } : {}),
+  } as ParamRef<T>;
+}

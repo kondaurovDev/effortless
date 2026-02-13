@@ -33,7 +33,8 @@ export { deployTable, deployAllTables } from "./deploy-table";
 import { type DeployInput, type DeployResult, type DeployTableResult } from "./shared";
 import { deployLambda } from "./deploy-http";
 import { deployTableFunction } from "./deploy-table";
-import { deploySiteLambda } from "./deploy-site";
+import { deployAppLambda } from "./deploy-app";
+import { deployStaticSite, type DeployStaticSiteResult } from "./deploy-static-site";
 
 // ============ Layer preparation ============
 
@@ -352,18 +353,18 @@ const deployTableHandlers = (ctx: DeployTableHandlersInput) =>
     return results;
   });
 
-// ============ Site route helpers ============
+// ============ App route helpers ============
 
-/** Build the two API Gateway route paths for a site handler. */
-export function buildSiteRoutePaths(configPath: string): [root: string, greedy: string] {
+/** Build the two API Gateway route paths for an app handler. */
+export function buildAppRoutePaths(configPath: string): [root: string, greedy: string] {
   const basePath = configPath.replace(/\/+$/, "");
   return [basePath || "/", `${basePath}/{file+}`];
 }
 
-// ============ Site handlers deployment ============
+// ============ App handlers deployment ============
 
-type DeploySiteHandlersInput = {
-  handlers: DiscoveredHandlers["siteHandlers"];
+type DeployAppHandlersInput = {
+  handlers: DiscoveredHandlers["appHandlers"];
   apiId: string;
   input: DeployProjectInput;
   layerArn: string | undefined;
@@ -372,12 +373,12 @@ type DeploySiteHandlersInput = {
   platformPermissions: readonly string[];
 };
 
-const deploySiteHandlers = (ctx: DeploySiteHandlersInput) =>
+const deployAppHandlers = (ctx: DeployAppHandlersInput) =>
   Effect.gen(function* () {
     const results: DeployResult[] = [];
 
     for (const { file, exports } of ctx.handlers) {
-      yield* Effect.logInfo(`Processing ${path.basename(file)} (${exports.length} site handler(s))`);
+      yield* Effect.logInfo(`Processing ${path.basename(file)} (${exports.length} app handler(s))`);
 
       const deployInput: DeployInput = {
         projectDir: ctx.input.projectDir,
@@ -393,7 +394,7 @@ const deploySiteHandlers = (ctx: DeploySiteHandlersInput) =>
           depsEnv: observe ? { ...ctx.platformEnv } : {},
           depsPermissions: observe ? [...ctx.platformPermissions] : [],
         };
-        const { exportName, functionArn, config, handlerName } = yield* deploySiteLambda({
+        const { exportName, functionArn, config, handlerName } = yield* deployAppLambda({
           input: deployInput,
           fn,
           ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
@@ -409,7 +410,7 @@ const deploySiteHandlers = (ctx: DeploySiteHandlersInput) =>
           )
         );
 
-        const [rootPath, greedyPath] = buildSiteRoutePaths(config.path);
+        const [rootPath, greedyPath] = buildAppRoutePaths(config.path ?? "/");
 
         // Route 1: root path (serves index.html)
         const { apiUrl: rootUrl } = yield* addRouteToApi({
@@ -444,7 +445,7 @@ const deploySiteHandlers = (ctx: DeploySiteHandlersInput) =>
         );
 
         results.push({ exportName, url: rootUrl, functionArn });
-        yield* Effect.logInfo(`  GET ${rootPath} → ${handlerName} (site)`);
+        yield* Effect.logInfo(`  GET ${rootPath} → ${handlerName} (app)`);
       }
     }
 
@@ -466,7 +467,8 @@ export type DeployProjectResult = {
   apiUrl?: string;
   httpResults: DeployResult[];
   tableResults: DeployTableResult[];
-  siteResults: DeployResult[];
+  appResults: DeployResult[];
+  staticSiteResults: DeployStaticSiteResult[];
 };
 
 export const deployProject = (input: DeployProjectInput) =>
@@ -480,17 +482,19 @@ export const deployProject = (input: DeployProjectInput) =>
 
     yield* Effect.logInfo(`Found ${files.length} file(s) matching patterns`);
 
-    const { httpHandlers, tableHandlers, siteHandlers } = discoverHandlers(files);
+    const { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers } = discoverHandlers(files);
 
     const totalHttpHandlers = httpHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalTableHandlers = tableHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalSiteHandlers = siteHandlers.reduce((acc, h) => acc + h.exports.length, 0);
+    const totalAppHandlers = appHandlers.reduce((acc, h) => acc + h.exports.length, 0);
+    const totalStaticSiteHandlers = staticSiteHandlers.reduce((acc, h) => acc + h.exports.length, 0);
+    const totalAllHandlers = totalHttpHandlers + totalTableHandlers + totalAppHandlers + totalStaticSiteHandlers;
 
-    if (totalHttpHandlers === 0 && totalTableHandlers === 0 && totalSiteHandlers === 0) {
+    if (totalAllHandlers === 0) {
       return yield* Effect.fail(new Error("No handlers found in matched files"));
     }
 
-    yield* Effect.logInfo(`Discovered ${totalHttpHandlers} HTTP, ${totalTableHandlers} table, ${totalSiteHandlers} site handler(s)`);
+    yield* Effect.logInfo(`Discovered ${totalHttpHandlers} HTTP, ${totalTableHandlers} table, ${totalAppHandlers} app, ${totalStaticSiteHandlers} static site handler(s)`);
 
     // Build table name map for deps resolution
     const tableNameMap = buildTableNameMap(tableHandlers, input.project, resolveStage(input.stage));
@@ -512,7 +516,7 @@ export const deployProject = (input: DeployProjectInput) =>
     let apiId: string | undefined;
     let apiUrl: string | undefined;
 
-    if (totalHttpHandlers > 0 || totalSiteHandlers > 0) {
+    if (totalHttpHandlers > 0 || totalAppHandlers > 0) {
       const tagCtx: TagContext = {
         project: input.project,
         stage: resolveStage(input.stage),
@@ -561,9 +565,9 @@ export const deployProject = (input: DeployProjectInput) =>
       platformPermissions: PLATFORM_PERMISSIONS,
     });
 
-    const siteResults = apiId
-      ? yield* deploySiteHandlers({
-          handlers: siteHandlers,
+    const appResults = apiId
+      ? yield* deployAppHandlers({
+          handlers: appHandlers,
           apiId,
           input,
           layerArn,
@@ -573,9 +577,33 @@ export const deployProject = (input: DeployProjectInput) =>
         })
       : [];
 
+    // Deploy static sites (S3 + CloudFront)
+    const staticSiteResults: DeployStaticSiteResult[] = [];
+    for (const { file, exports } of staticSiteHandlers) {
+      yield* Effect.logInfo(`Processing ${path.basename(file)} (${exports.length} static site handler(s))`);
+      for (const fn of exports) {
+        const result = yield* deployStaticSite({
+          projectDir: input.projectDir,
+          project: input.project,
+          stage: input.stage,
+          region: input.region,
+          fn,
+        }).pipe(
+          Effect.provide(
+            Aws.makeClients({
+              s3: { region: input.region },
+              cloudfront: { region: "us-east-1" },
+              resource_groups_tagging_api: { region: "us-east-1" },
+            })
+          )
+        );
+        staticSiteResults.push(result);
+      }
+    }
+
     if (apiUrl) {
       yield* Effect.logInfo(`Deployment complete! API: ${apiUrl}`);
     }
 
-    return { apiId, apiUrl, httpResults, tableResults, siteResults };
+    return { apiId, apiUrl, httpResults, tableResults, appResults, staticSiteResults };
   });

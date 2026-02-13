@@ -1,4 +1,5 @@
 import { defineTable } from "../../src/handlers/define-table";
+import { param } from "../../src/handlers/param";
 
 type Order = {
   id: string;
@@ -7,16 +8,22 @@ type Order = {
   customerId: string;
 };
 
+type Customer = { customerId: string; email: string; tier: string };
+
 // Event types for analytics
 type OrderEvent =
   | { type: "order_created"; orderId: string; amount: number; customerId: string }
   | { type: "order_updated"; orderId: string; oldStatus: string; newStatus: string; amountDelta: number }
   | { type: "order_cancelled"; orderId: string; lostRevenue: number; customerId: string };
 
+// Dep: customers table (resource-only)
+export const customers = defineTable<Customer>({
+  pk: { name: "customerId", type: "string" },
+});
+
 // Simulated external service
 const analyticsService = {
   async sendBatch(events: OrderEvent[]): Promise<void> {
-    // In real world: fetch("https://analytics.example.com/events", { method: "POST", body: JSON.stringify(events) })
     console.log(`[Analytics] Sending ${events.length} events to analytics service`);
     console.log(JSON.stringify(events, null, 2));
   }
@@ -31,14 +38,23 @@ const notificationService = {
   }
 };
 
-export const orders = defineTable<Order, undefined, OrderEvent | null>({
+export const orders = defineTable({
   name: "test-orders",
   pk: { name: "id", type: "string" },
   streamView: "NEW_AND_OLD_IMAGES",
   batchSize: 10,
   memory: 256,
 
-  onRecord: async ({ record }): Promise<OrderEvent | null> => {
+  schema: (input): Order => input as Order,
+  deps: { customers },
+  params: {
+    highValueThreshold: param("high-value-threshold", Number),
+  },
+  context: ({ params }) => ({
+    highValueThreshold: params.highValueThreshold,
+  }),
+
+  onRecord: async ({ record, deps, params, ctx }): Promise<OrderEvent | null> => {
     const { eventName, old: oldOrder, new: newOrder } = record;
 
     if (eventName === "INSERT" && newOrder) {

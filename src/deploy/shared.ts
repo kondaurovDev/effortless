@@ -100,7 +100,7 @@ export type DeployCoreLambdaInput = {
   defaultPermissions?: readonly string[];
   memory?: number;
   timeout?: number;
-  bundleType?: "http" | "table" | "site";
+  bundleType?: "http" | "table" | "app";
   layerArn?: string;
   external?: string[];
   /** Environment variables to set on the Lambda (e.g., for deps) */

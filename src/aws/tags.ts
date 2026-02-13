@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import type { ResourceTagMapping } from "@aws-sdk/client-resource-groups-tagging-api";
 import { resource_groups_tagging_api as tagging } from "./clients";
 
-export type ResourceType = "lambda" | "iam-role" | "dynamodb" | "api-gateway" | "lambda-layer";
+export type ResourceType = "lambda" | "iam-role" | "dynamodb" | "api-gateway" | "lambda-layer" | "s3-bucket" | "cloudfront-distribution";
 
 export type TagContext = {
   project: string;
@@ -45,6 +45,38 @@ export const getResourcesByTags = (project: string, stage: string) =>
       ],
     });
     return result.ResourceTagMappingList ?? [];
+  });
+
+/**
+ * Query all resources including global ones (CloudFront, IAM).
+ * Makes a regional query via the injected client + a separate us-east-1 query for global resources.
+ * Deduplicates by ARN.
+ */
+export const getAllResourcesByTags = (project: string, stage: string, region: string) =>
+  Effect.gen(function* () {
+    const tagFilters = [
+      { Key: "effortless:project", Values: [project] },
+      { Key: "effortless:stage", Values: [stage] },
+    ];
+
+    // Regional resources via injected client
+    const regional = yield* getResourcesByTags(project, stage);
+
+    // Skip global query if already in us-east-1
+    if (region === "us-east-1") return regional;
+
+    // Global resources (CloudFront, IAM) via us-east-1 layer
+    const globalResult = yield* tagging.make("get_resources", {
+      TagFilters: tagFilters,
+    }).pipe(
+      Effect.provide(tagging.ResourceGroupsTaggingAPIClient.Default({ region: "us-east-1" })),
+      Effect.catchAll(() => Effect.succeed({ ResourceTagMappingList: [] as ResourceTagMapping[] })),
+    );
+    const global = globalResult.ResourceTagMappingList ?? [];
+
+    // Merge and deduplicate by ARN
+    const seen = new Set(regional.map(r => r.ResourceARN));
+    return [...regional, ...global.filter(r => !seen.has(r.ResourceARN))];
   });
 
 /**

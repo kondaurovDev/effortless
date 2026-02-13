@@ -3,7 +3,7 @@ import { Effect, Console, Logger, LogLevel, Option } from "effect";
 
 import {
   Aws,
-  getResourcesByTags,
+  getAllResourcesByTags,
   groupResourcesByHandler,
   listEffortlessRoles,
   deleteRole
@@ -44,6 +44,8 @@ export const cleanupCommand = Command.make(
         apigatewayv2: { region: finalRegion },
         dynamodb: { region: finalRegion },
         resource_groups_tagging_api: { region: finalRegion },
+        s3: { region: finalRegion },
+        cloudfront: { region: "us-east-1" },
       });
 
       const logLevel = verbose ? LogLevel.Debug : LogLevel.Info;
@@ -51,7 +53,7 @@ export const cleanupCommand = Command.make(
       yield* Effect.gen(function* () {
         yield* Console.log(`\nLooking for resources in ${project}/${finalStage}...\n`);
 
-        const resources = yield* getResourcesByTags(project, finalStage);
+        const resources = yield* getAllResourcesByTags(project, finalStage, finalRegion);
 
         if (resources.length === 0) {
           yield* Console.log("No resources found.");

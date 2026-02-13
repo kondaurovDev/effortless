@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "fs";
 import { join, extname, resolve } from "path";
-import type { SiteHandler } from "~/handlers/define-site";
+import type { AppHandler } from "~/handlers/define-app";
 import { createHandlerRuntime } from "./handler-utils";
 
 // Content-type map for common web file types
@@ -57,9 +57,9 @@ type LambdaEvent = {
   headers?: Record<string, string>;
 };
 
-export const wrapSite = (handler: SiteHandler) => {
+export const wrapApp = (handler: AppHandler) => {
   const { dir, index: indexFile = "index.html", spa = false } = handler.config;
-  const rt = createHandlerRuntime({}, "site");
+  const rt = createHandlerRuntime({}, "app");
   const baseDir = join(process.cwd(), dir);
 
   return async (event: LambdaEvent) => {

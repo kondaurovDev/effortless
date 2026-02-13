@@ -4,34 +4,47 @@ description: Code-first AWS Lambda framework. Export handlers, deploy with one c
 template: splash
 ---
 
-import { Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Card, CardGrid, LinkButton, Tabs, TabItem } from '@astrojs/starlight/components';
 import AnimatedHero from '../../components/AnimatedHero.astro';
 
 <AnimatedHero />
 
-## Features
-
 <CardGrid>
   <Card title="Infrastructure from code">
-    Export a handler — get Lambda, API Gateway, DynamoDB, IAM. No YAML, no config files. Inspired by [Firebase](https://firebase.google.com/). [Learn more →](/handlers/)
+    Export a handler — get the full AWS infrastructure automatically. No YAML, no config files.
+
+    - Export handler — get Lambda, API Gateway, DynamoDB, IAM
+    - Auto IAM wiring from `deps: { orders }`
+    - Secrets via `param("key")` — fetched from SSM at cold start
+
+    <LinkButton href="/why-effortless/" variant="secondary" icon="right-arrow">Learn more</LinkButton>
   </Card>
-  <Card title="Deploy in seconds">
-    Direct AWS SDK calls. No CloudFormation, no Pulumi. Deploy in ~5-10s, not 5-10 minutes. [Why not CloudFormation →](/faq/#why-not-cloudformation)
+  <Card title="Zero overhead deployment">
+    Direct AWS SDK calls instead of CloudFormation. No state files to manage. Deploy in seconds, not minutes.
+
+    - Deploy in ~5-10s — direct API calls, no CloudFormation
+    - No state files — AWS resource tags as source of truth
+    - Smart Lambda Layers with hash-based versioning
+
+    <LinkButton href="/faq/#why-not-cloudformation" variant="secondary" icon="right-arrow">Learn more</LinkButton>
   </Card>
-  <Card title="Typed everything">
-    `defineTable<Order>` gives you typed `put()`, typed `deps.orders.get()`, typed `record.new`. One definition, types flow everywhere. [Handlers →](/handlers/)
+  <Card title="Type safety everywhere">
+    One `defineTable<Order>` call creates the table, generates typed clients, and validates data at runtime with Effect Schema.
+
+    - Typed `.put()`, `.get()`, typed stream records
+    - Schema validation via Effect Schema before your handler runs
+    - One definition — types flow to clients, streams, and deps
+
+    <LinkButton href="/handlers/" variant="secondary" icon="right-arrow">Learn more</LinkButton>
   </Card>
-  <Card title="No state files">
-    AWS resource tags are the source of truth. No tfstate, no S3 backends, no drift. [How it works →](/architecture/#resource-discovery)
-  </Card>
-  <Card title="Built-in best practices">
-    Partial batch failures, cold start caching, schema validation, typed event parsing. Serverless patterns baked in — inspired by [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/). [Details →](/getting-started/#built-in-best-practices)
-  </Card>
-  <Card title="Auto-wired permissions">
-    Reference another handler with `deps: { orders }` — IAM permissions and typed clients are injected automatically. Secrets via `param("key")` — fetched from SSM at cold start. [Architecture →](/architecture/#inter-handler-dependencies-deps)
-  </Card>
-  <Card title="Smart Lambda Layers">
-    Production deps from `node_modules` are auto-packaged into a shared Lambda Layer. Works with npm, pnpm, yarn. Hash-based versioning — re-uploads only when deps change. [Details →](/architecture/#lambda-layer-production-dependencies)
+  <Card title="Production ready by default">
+    Serverless best practices baked in — inspired by AWS Lambda Powertools. No boilerplate needed.
+
+    - Partial batch failures — bad records don't kill the batch
+    - Cold start caching — `context` factory runs once, reused across invocations
+    - Execution logging and error tracking via platform table
+
+    <LinkButton href="/architecture/" variant="secondary" icon="right-arrow">Learn more</LinkButton>
   </Card>
 </CardGrid>
 
@@ -91,9 +104,9 @@ import AnimatedHero from '../../components/AnimatedHero.astro';
   <TabItem label="Static site">
     ```typescript
     // src/site.ts
-    import { defineSite } from "effortless-aws";
+    import { defineApp } from "effortless-aws";
 
-    export const docs = defineSite({
+    export const docs = defineApp({
       path: "/",
       dir: "dist",
       build: "npx astro build",

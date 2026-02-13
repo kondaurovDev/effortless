@@ -12,8 +12,8 @@ import {
 } from "./platform-types";
 
 export type PlatformClient = {
-  appendExecution(handlerName: string, handlerType: "http" | "table" | "site", entry: ExecutionEntry): Promise<void>;
-  appendError(handlerName: string, handlerType: "http" | "table" | "site", entry: ErrorEntry): Promise<void>;
+  appendExecution(handlerName: string, handlerType: "http" | "table" | "app", entry: ExecutionEntry): Promise<void>;
+  appendError(handlerName: string, handlerType: "http" | "table" | "app", entry: ErrorEntry): Promise<void>;
   get<T extends PlatformEntity>(pk: string, sk: string): Promise<T | undefined>;
   query<T extends PlatformEntity>(pk: string, skPrefix?: string): Promise<T[]>;
   put(entity: PlatformEntity): Promise<void>;
@@ -29,7 +29,7 @@ export const createPlatformClient = (): PlatformClient | undefined => {
 
   const appendToList = async (
     handlerName: string,
-    handlerType: "http" | "table" | "site",
+    handlerType: "http" | "table" | "app",
     listAttr: "executions" | "errors",
     entry: ExecutionEntry | ErrorEntry
   ): Promise<void> => {

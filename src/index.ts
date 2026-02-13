@@ -5,13 +5,15 @@ export type { EffortlessConfig } from "./config"
 // Handlers
 export { defineHttp } from "./handlers/define-http"
 export { defineTable } from "./handlers/define-table"
-export { defineSite } from "./handlers/define-site"
+export { defineApp } from "./handlers/define-app"
+export { defineStaticSite } from "./handlers/define-static-site"
 export { param } from "./handlers/param"
 
 // Types
 export type { HttpConfig, HttpRequest, HttpResponse, HttpMethod, ContentType, HttpHandler, HttpHandlerFn, DefineHttpOptions, ResolveDeps } from "./handlers/define-http"
 export type { TableConfig, TableRecord, TableHandler, TableKey, KeyType, StreamView, DefineTableOptions, TableRecordFn, TableBatchFn, TableBatchCompleteFn, FailedRecord } from "./handlers/define-table"
-export type { SiteConfig, SiteHandler } from "./handlers/define-site"
+export type { AppConfig, AppHandler } from "./handlers/define-app"
+export type { StaticSiteConfig, StaticSiteHandler } from "./handlers/define-static-site"
 export type { TableClient, QueryParams } from "./runtime/table-client"
 export type { ParamRef, ResolveParams } from "./handlers/param"
 

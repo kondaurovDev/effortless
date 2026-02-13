@@ -4,7 +4,9 @@ import {
   deleteApi,
   deleteRole,
   deleteTable,
-  deleteLayerVersion
+  deleteLayerVersion,
+  deleteBucket,
+  disableAndDeleteDistribution,
 } from "../aws";
 
 export type ResourceInfo = {
@@ -40,6 +42,14 @@ const extractResourceName = (arn: string, type: string): string => {
       // arn:aws:lambda:region:account:layer:name:version
       const parts = arn.split(":");
       return parts[parts.length - 2] ?? arn; // layer name (without version)
+    }
+    case "s3-bucket": {
+      // arn:aws:s3:::bucket-name
+      return arn.split(":::")[1] ?? arn;
+    }
+    case "cloudfront-distribution": {
+      // arn:aws:cloudfront::account:distribution/DISTRIBUTION_ID
+      return arn.split("/").pop() ?? arn;
     }
     default:
       return arn;
@@ -77,6 +87,12 @@ export const deleteResource = (resource: ResourceInfo) =>
         yield* deleteLayerVersion(layerInfo.name, layerInfo.version);
         break;
       }
+      case "s3-bucket":
+        yield* deleteBucket(name);
+        break;
+      case "cloudfront-distribution":
+        yield* disableAndDeleteDistribution(name);
+        break;
       default:
         yield* Effect.logWarning(`Unknown resource type: ${resource.type}, skipping ${resource.arn}`);
     }
@@ -84,10 +100,11 @@ export const deleteResource = (resource: ResourceInfo) =>
 
 export const deleteResources = (resources: ResourceInfo[]) =>
   Effect.gen(function* () {
-    // Delete in order: lambda -> api-gateway -> dynamodb -> lambda-layer -> iam-role
+    // Delete in order: lambda -> api-gateway -> cloudfront -> dynamodb -> s3 -> lambda-layer -> iam-role
+    // CloudFront before S3 (distribution references bucket)
     // IAM roles should be deleted last because they might be in use
     // Lambda layers should be deleted after lambdas that use them
-    const orderedTypes = ["lambda", "api-gateway", "dynamodb", "lambda-layer", "iam-role"];
+    const orderedTypes = ["lambda", "api-gateway", "cloudfront-distribution", "dynamodb", "s3-bucket", "lambda-layer", "iam-role"];
 
     // Collect IAM roles to delete (derived from Lambda names)
     const iamRolesToDelete = new Set<string>();

@@ -1,16 +1,16 @@
 import { Effect } from "effect";
 import { execSync } from "child_process";
-import type { ExtractedSiteFunction } from "~/build/bundle";
+import type { ExtractedAppFunction } from "~/build/bundle";
 import {
   type DeployInput,
   deployCoreLambda,
 } from "./shared";
 
-// ============ Site handler deployment ============
+// ============ App handler deployment ============
 
-type DeploySiteLambdaInput = {
+type DeployAppLambdaInput = {
   input: DeployInput;
-  fn: ExtractedSiteFunction;
+  fn: ExtractedAppFunction;
   layerArn?: string;
   external?: string[];
   depsEnv?: Record<string, string>;
@@ -18,7 +18,7 @@ type DeploySiteLambdaInput = {
 };
 
 /** @internal */
-export const deploySiteLambda = ({ input, fn, layerArn, external, depsEnv, depsPermissions }: DeploySiteLambdaInput) =>
+export const deployAppLambda = ({ input, fn, layerArn, external, depsEnv, depsPermissions }: DeployAppLambdaInput) =>
   Effect.gen(function* () {
     const { exportName, config } = fn;
     const handlerName = config.name ?? exportName;
@@ -39,7 +39,7 @@ export const deploySiteLambda = ({ input, fn, layerArn, external, depsEnv, depsP
       input,
       exportName,
       handlerName,
-      bundleType: "site",
+      bundleType: "app",
       ...(config.memory ? { memory: config.memory } : {}),
       timeout: config.timeout ?? 5,
       ...(layerArn ? { layerArn } : {}),

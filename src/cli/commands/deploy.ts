@@ -38,6 +38,8 @@ export const deployCommand = Command.make(
         apigatewayv2: { region: finalRegion },
         dynamodb: { region: finalRegion },
         resource_groups_tagging_api: { region: finalRegion },
+        s3: { region: finalRegion },
+        cloudfront: { region: "us-east-1" },
       });
 
       const logLevel = verbose ? LogLevel.Debug : LogLevel.Info;
@@ -60,7 +62,7 @@ export const deployCommand = Command.make(
               region: finalRegion,
             });
 
-            const total = results.httpResults.length + results.tableResults.length + results.siteResults.length;
+            const total = results.httpResults.length + results.tableResults.length + results.appResults.length + results.staticSiteResults.length;
             yield* Console.log(`\nDeployed ${total} handler(s):`);
             for (const r of results.httpResults) {
               yield* Console.log(`  [http] ${r.exportName}: ${r.url}`);
@@ -68,7 +70,10 @@ export const deployCommand = Command.make(
             for (const r of results.tableResults) {
               yield* Console.log(`  [table] ${r.exportName}: ${r.tableArn}`);
             }
-            for (const r of results.siteResults) {
+            for (const r of results.appResults) {
+              yield* Console.log(`  [app] ${r.exportName}: ${r.url}`);
+            }
+            for (const r of results.staticSiteResults) {
               yield* Console.log(`  [site] ${r.exportName}: ${r.url}`);
             }
           }),
@@ -130,7 +135,7 @@ export const deployCommand = Command.make(
 
               let foundFile: string | null = null;
               let foundExport: string | null = null;
-              let handlerType: "http" | "table" | "site" = "http";
+              let handlerType: "http" | "table" | "app" = "http";
 
               for (const { file, exports } of discovered.httpHandlers) {
                 for (const { exportName, config: handlerConfig } of exports) {
@@ -158,12 +163,12 @@ export const deployCommand = Command.make(
               }
 
               if (!foundFile) {
-                for (const { file, exports } of discovered.siteHandlers) {
+                for (const { file, exports } of discovered.appHandlers) {
                   for (const { exportName, config: handlerConfig } of exports) {
                     if (handlerConfig.name === targetValue) {
                       foundFile = file;
                       foundExport = exportName;
-                      handlerType = "site";
+                      handlerType = "app";
                       break;
                     }
                   }
@@ -184,9 +189,9 @@ export const deployCommand = Command.make(
                     yield* Console.log(`  [table] ${c.name}`);
                   }
                 }
-                for (const { exports } of discovered.siteHandlers) {
+                for (const { exports } of discovered.appHandlers) {
                   for (const { config: c } of exports) {
-                    yield* Console.log(`  [site] ${c.name}`);
+                    yield* Console.log(`  [app] ${c.name}`);
                   }
                 }
                 return;
@@ -207,7 +212,7 @@ export const deployCommand = Command.make(
                 const result = yield* deployTable(input);
                 yield* Console.log(`\nTable deployed: ${result.tableArn}`);
               } else {
-                // Both http and site handlers deploy via the same deploy() path
+                // Both http and app handlers deploy via the same deploy() path
                 const result = yield* deploy(input);
                 yield* Console.log(`\nDeployed: ${result.url}`);
               }
