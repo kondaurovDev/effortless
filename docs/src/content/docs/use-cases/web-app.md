@@ -11,7 +11,7 @@ Effortless gives you two options depending on your needs: **defineApp** (Lambda 
 
 Your frontend lives in the same project as your API. You want everything on the same domain, deployed with one command.
 
-`defineApp` bundles your built site into a Lambda that serves static files through API Gateway. [Lambda](https://aws.amazon.com/lambda/) is fast — cold starts on Node.js are typically 100-200ms, and warm invocations respond in single-digit milliseconds. For serving static files that's more than enough, and you're paying fractions of a cent per 10,000 requests. Since the site shares the same API Gateway as your HTTP handlers, there's no extra infrastructure — no S3 bucket, no CloudFront distribution, no additional cost.
+`defineApp` bundles your built site into a Lambda that serves static files through API Gateway. Since the site shares the same API Gateway as your HTTP handlers, there's no extra infrastructure — no S3 bucket, no CloudFront distribution, no additional cost.
 
 ```typescript
 // src/site.ts
@@ -65,12 +65,13 @@ export const frontend = defineApp({
 
 ```typescript
 // src/api.ts
-import { defineHttp, defineTable } from "effortless-aws";
+import { defineHttp, defineTable, typed } from "effortless-aws";
 
 type Item = { id: string; name: string };
 
-export const items = defineTable<Item>({
+export const items = defineTable({
   pk: { name: "id", type: "string" },
+  schema: typed<Item>(),
 });
 
 export const listItems = defineHttp({
@@ -92,7 +93,7 @@ Your React app fetches `/api/items` — same domain, same API Gateway. The front
 
 Your site is public-facing — a marketing page, blog, documentation — and you want fast load times worldwide.
 
-[CloudFront](https://aws.amazon.com/cloudfront/) is AWS's CDN — 450+ edge locations globally, sub-50ms latency for most users, and the first 1 TB of data transfer per month is free. Once cached, your files are served directly from the edge — no Lambda, no origin server, just bytes flying from the nearest location. For a typical static site the cost is essentially zero.
+[CloudFront](/why-aws/#cloudfront--s3) is AWS's global CDN. Once cached, your files are served directly from the nearest edge location — no Lambda, no origin server.
 
 The usual pain is the setup: create a private S3 bucket, configure Origin Access Control, set up URL rewriting for clean paths, handle SPA routing with custom error responses, and invalidate the cache on every deploy. `defineStaticSite` does all of this from one export.
 

@@ -26,6 +26,10 @@ export type { EnsureBucketInput, SyncFilesInput, SyncFilesResult } from "./s3";
 export { ensureOAC, ensureUrlRewriteFunction, ensureDistribution, invalidateDistribution, disableAndDeleteDistribution, deleteOAC } from "./cloudfront";
 export type { EnsureOACInput, EnsureDistributionInput, DistributionResult } from "./cloudfront";
 
+// SQS
+export { ensureFifoQueue, ensureSqsEventSourceMapping, deleteFifoQueue } from "./sqs";
+export type { EnsureFifoQueueInput, EnsureFifoQueueResult, EnsureSqsEventSourceMappingInput } from "./sqs";
+
 // Tags
 export { makeTags, toAwsTagList, resolveStage, getResourcesByTags, getAllResourcesByTags, findOrphanedResources, groupResourcesByHandler } from "./tags";
 export type { ResourceType, TagContext } from "./tags";

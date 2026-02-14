@@ -54,12 +54,13 @@ my-service/
 
 ```typescript
 // src/orders.ts
-import { defineTable, defineHttp } from "effortless-aws";
+import { defineTable, defineHttp, typed } from "effortless-aws";
 
 type Order = { id: string; product: string; amount: number };
 
-export const orders = defineTable<Order>({
+export const orders = defineTable({
   pk: { name: "id", type: "string" },
+  schema: typed<Order>(),
   onRecord: async ({ record }) => {
     console.log("New order:", record.new!.product);
   },
@@ -101,13 +102,14 @@ This single file creates:
 The most common Lambda pattern: HTTP endpoints that read/write from DynamoDB.
 
 ```typescript
-import { defineTable, defineHttp } from "effortless-aws";
+import { defineTable, defineHttp, typed } from "effortless-aws";
 import { Schema } from "effect";
 
 type User = { id: string; email: string; name: string; createdAt: string };
 
-export const users = defineTable<User>({
+export const users = defineTable({
   pk: { name: "id", type: "string" },
+  schema: typed<User>(),
 });
 
 // POST /users — validated request body
@@ -155,12 +157,13 @@ What you get without writing any infrastructure:
 DynamoDB streams let you react to data changes without polling.
 
 ```typescript
-import { defineTable, defineHttp } from "effortless-aws";
+import { defineTable, typed } from "effortless-aws";
 
 type Order = { id: string; product: string; amount: number; status: string };
 
-export const orders = defineTable<Order>({
+export const orders = defineTable({
   pk: { name: "id", type: "string" },
+  schema: typed<Order>(),
   // Stream processor — runs on every insert/update/delete
   onRecord: async ({ record }) => {
     if (record.eventName === "INSERT") {
@@ -171,8 +174,9 @@ export const orders = defineTable<Order>({
 });
 
 // Or process records in batches for efficiency
-export const analytics = defineTable<AnalyticsEvent>({
+export const analytics = defineTable({
   pk: { name: "id", type: "string" },
+  schema: typed<AnalyticsEvent>(),
   batchSize: 100,
   onBatch: async ({ records }) => {
     const inserts = records.filter(r => r.eventName === "INSERT");
@@ -268,4 +272,4 @@ No manual SSM calls. No `GetParameter` permission writing. No environment variab
 - [Installation](/installation/) — install and deploy your first handler in 2 minutes
 - [Handlers](/handlers/) — all handler types and their options
 - [Architecture](/architecture/) — how static analysis, bundling, and deployment work
-- [FAQ](/faq/) — detailed comparisons with SST, Nitric, Serverless Framework, and others
+- [Comparisons](/comparisons/) — detailed comparisons with SST, Nitric, Serverless Framework, and others

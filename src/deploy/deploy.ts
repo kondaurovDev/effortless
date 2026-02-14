@@ -35,6 +35,7 @@ import { deployLambda } from "./deploy-http";
 import { deployTableFunction } from "./deploy-table";
 import { deployAppLambda } from "./deploy-app";
 import { deployStaticSite, type DeployStaticSiteResult } from "./deploy-static-site";
+import { deployFifoQueueFunction, type DeployFifoQueueResult } from "./deploy-fifo-queue";
 
 // ============ Layer preparation ============
 
@@ -469,6 +470,7 @@ export type DeployProjectResult = {
   tableResults: DeployTableResult[];
   appResults: DeployResult[];
   staticSiteResults: DeployStaticSiteResult[];
+  fifoQueueResults: DeployFifoQueueResult[];
 };
 
 export const deployProject = (input: DeployProjectInput) =>
@@ -482,19 +484,20 @@ export const deployProject = (input: DeployProjectInput) =>
 
     yield* Effect.logInfo(`Found ${files.length} file(s) matching patterns`);
 
-    const { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers } = discoverHandlers(files);
+    const { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers } = discoverHandlers(files);
 
     const totalHttpHandlers = httpHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalTableHandlers = tableHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalAppHandlers = appHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalStaticSiteHandlers = staticSiteHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalAllHandlers = totalHttpHandlers + totalTableHandlers + totalAppHandlers + totalStaticSiteHandlers;
+    const totalFifoQueueHandlers = fifoQueueHandlers.reduce((acc, h) => acc + h.exports.length, 0);
+    const totalAllHandlers = totalHttpHandlers + totalTableHandlers + totalAppHandlers + totalStaticSiteHandlers + totalFifoQueueHandlers;
 
     if (totalAllHandlers === 0) {
       return yield* Effect.fail(new Error("No handlers found in matched files"));
     }
 
-    yield* Effect.logInfo(`Discovered ${totalHttpHandlers} HTTP, ${totalTableHandlers} table, ${totalAppHandlers} app, ${totalStaticSiteHandlers} static site handler(s)`);
+    yield* Effect.logInfo(`Discovered ${totalHttpHandlers} HTTP, ${totalTableHandlers} table, ${totalAppHandlers} app, ${totalStaticSiteHandlers} static site, ${totalFifoQueueHandlers} FIFO queue handler(s)`);
 
     // Build table name map for deps resolution
     const tableNameMap = buildTableNameMap(tableHandlers, input.project, resolveStage(input.stage));
@@ -601,9 +604,54 @@ export const deployProject = (input: DeployProjectInput) =>
       }
     }
 
+    // Deploy FIFO queue handlers
+    const fifoQueueResults: DeployFifoQueueResult[] = [];
+    for (const { file, exports } of fifoQueueHandlers) {
+      yield* Effect.logInfo(`Processing ${path.basename(file)} (${exports.length} FIFO queue handler(s))`);
+
+      const deployInput: DeployInput = {
+        projectDir: input.projectDir,
+        file,
+        project: input.project,
+        region: input.region,
+      };
+      if (input.stage) deployInput.stage = input.stage;
+
+      for (const fn of exports) {
+        const fnStage = resolveStage(input.stage);
+        const resolved = mergeResolved(
+          resolveDeps(fn.depsKeys, tableNameMap),
+          resolveParams(fn.paramEntries, input.project, fnStage)
+        );
+        const observe = fn.config.observe !== false;
+        const withPlatform = {
+          depsEnv: { ...resolved?.depsEnv, ...(observe ? platformEnv : {}) },
+          depsPermissions: [...(resolved?.depsPermissions ?? []), ...(observe ? PLATFORM_PERMISSIONS : [])],
+        };
+        const result = yield* deployFifoQueueFunction({
+          input: deployInput,
+          fn,
+          ...(layerArn ? { layerArn } : {}),
+          ...(external.length > 0 ? { external } : {}),
+          depsEnv: withPlatform.depsEnv,
+          depsPermissions: withPlatform.depsPermissions,
+          ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
+        }).pipe(
+          Effect.provide(
+            Aws.makeClients({
+              lambda: { region: input.region },
+              iam: { region: input.region },
+              sqs: { region: input.region },
+            })
+          )
+        );
+        fifoQueueResults.push(result);
+      }
+    }
+
     if (apiUrl) {
       yield* Effect.logInfo(`Deployment complete! API: ${apiUrl}`);
     }
 
-    return { apiId, apiUrl, httpResults, tableResults, appResults, staticSiteResults };
+    return { apiId, apiUrl, httpResults, tableResults, appResults, staticSiteResults, fifoQueueResults };
   });

@@ -26,10 +26,10 @@ import AnimatedHero from '../../components/AnimatedHero.astro';
     - No state files — AWS resource tags as source of truth
     - Smart Lambda Layers with hash-based versioning
 
-    <LinkButton href="/faq/#why-not-cloudformation" variant="secondary" icon="right-arrow">Learn more</LinkButton>
+    <LinkButton href="/comparisons/#why-not-cloudformation" variant="secondary" icon="right-arrow">Learn more</LinkButton>
   </Card>
   <Card title="Type safety everywhere">
-    One `defineTable<Order>` call creates the table, generates typed clients, and validates data at runtime with Effect Schema.
+    One `defineTable` call creates the table, generates typed clients, and validates data at runtime with Effect Schema.
 
     - Typed `.put()`, `.get()`, typed stream records
     - Schema validation via Effect Schema before your handler runs
@@ -38,95 +38,139 @@ import AnimatedHero from '../../components/AnimatedHero.astro';
     <LinkButton href="/handlers/" variant="secondary" icon="right-arrow">Learn more</LinkButton>
   </Card>
   <Card title="Production ready by default">
-    Serverless best practices baked in — inspired by AWS Lambda Powertools. No boilerplate needed.
+    Built on AWS managed services — multi-AZ availability, automatic scaling, zero maintenance. Best practices baked in.
 
     - Partial batch failures — bad records don't kill the batch
     - Cold start caching — `context` factory runs once, reused across invocations
     - Execution logging and error tracking via platform table
 
-    <LinkButton href="/architecture/" variant="secondary" icon="right-arrow">Learn more</LinkButton>
+    <LinkButton href="/why-aws/" variant="secondary" icon="right-arrow">Learn more</LinkButton>
   </Card>
 </CardGrid>
 
-## Examples
+## Build a todo app
+
+Each tab adds a layer — every export creates real AWS infrastructure.
 
 <Tabs>
-  <TabItem label="HTTP API">
+  <TabItem label="1. HTTP API">
+    One export — one endpoint. Method, path, handler function. Returns JSON automatically.
+
     ```typescript
     // src/api.ts
     import { defineHttp } from "effortless-aws";
 
     export const hello = defineHttp({
       method: "GET",
-      path: "/hello/{name}",
-      onRequest: async ({ req }) => {
-        return {
-          status: 200,
-          body: { message: `Hello, ${req.params.name}!` },
-        };
-      },
+      path: "/",
+      onRequest: async () => ({
+        status: 200,
+        body: { message: "Todo API is running" },
+      }),
     });
     ```
-    Creates: Lambda + API Gateway `GET /hello/{name}` route + IAM role.
   </TabItem>
-  <TabItem label="DynamoDB + API">
+  <TabItem label="2. Add a database">
+    Define a table with a type — get a typed client. Import it as `deps` in any handler — IAM permissions are wired automatically.
+
     ```typescript
-    // src/orders.ts
-    import { defineTable, defineHttp } from "effortless-aws";
+    // src/db.ts — define the table
+    import { defineTable, typed } from "effortless-aws";
 
-    type Order = { id: string; product: string; amount: number };
+    type Todo = { id: string; title: string; done: boolean };
 
-    export const orders = defineTable<Order>({
+    export const todos = defineTable({
       pk: { name: "id", type: "string" },
-      onRecord: async ({ record }) => {
-        if (record.eventName === "INSERT") {
-          console.log("New order:", record.new!.product);
-        }
-      },
+      schema: typed<Todo>(),
     });
 
-    export const createOrder = defineHttp({
+    // src/api.ts — use it as a typed dependency
+    import { defineHttp } from "effortless-aws";
+    import { todos } from "./db";
+
+    export const addTodo = defineHttp({
       method: "POST",
-      path: "/orders",
-      deps: { orders },
+      path: "/todos",
+      deps: { todos },
       onRequest: async ({ req, deps }) => {
-        await deps.orders.put({
+        await deps.todos.put({
           id: crypto.randomUUID(),
-          product: req.body.product,
-          amount: req.body.amount,
+          title: req.body.title,
+          done: false,
         });
         return { status: 201, body: { ok: true } };
       },
     });
     ```
-    Creates: DynamoDB table with stream + stream processor Lambda + HTTP Lambda with DynamoDB write permissions + API Gateway route. All from one file.
   </TabItem>
-  <TabItem label="Static site">
-    ```typescript
-    // src/site.ts
-    import { defineApp } from "effortless-aws";
+  <TabItem label="3. Add secrets">
+    `param()` reads secrets from SSM Parameter Store at cold start and caches them. `context` factory creates long-lived clients from those secrets — a built-in DI pattern.
 
-    export const docs = defineApp({
-      path: "/",
-      dir: "dist",
-      build: "npx astro build",
+    ```typescript
+    // src/api.ts — add params and context
+    import { defineHttp, param } from "effortless-aws";
+    import { todos } from "./db";
+
+    export const addTodo = defineHttp({
+      method: "POST",
+      path: "/todos",
+      deps: { todos },
+      params: { slackUrl: param("slack/webhook") },
+      context: async ({ params }) => ({
+        slack: createSlack(params.slackUrl),
+      }),
+      onRequest: async ({ req, deps, ctx }) => {
+        await deps.todos.put({
+          id: crypto.randomUUID(),
+          title: req.body.title,
+          done: false,
+        });
+        await ctx.slack.send(`New todo: ${req.body.title}`);
+        return { status: 201, body: { ok: true } };
+      },
     });
     ```
-    Creates: Lambda that serves static files from `dist/` + API Gateway routes. Runs the build command before deploy. Automatic content-type detection, caching headers, binary file support.
+  </TabItem>
+  <TabItem label="4. Serve the frontend">
+    Point to a build directory — the frontend is served on the same domain as your API. SPA routing, content-type detection, caching headers included.
+
+    ```typescript
+    // src/app.ts
+    import { defineApp } from "effortless-aws";
+
+    export const frontend = defineApp({
+      dir: "dist",
+      path: "/",
+      spa: true,
+      build: "npm run build",
+    });
+    ```
   </TabItem>
 </Tabs>
 
+### Deploy
+
 ```bash
-npx eff deploy
+$ npx eff deploy
+
+Deployed 3 handler(s) in 8s:
+  [table] todos    arn:aws:dynamodb:eu-west-1:***:table/todo-app-dev-todos
+  [http]  addTodo  https://abc123.execute-api.eu-west-1.amazonaws.com/todos
+  [app]   frontend https://abc123.execute-api.eu-west-1.amazonaws.com/
 ```
 
-## How it works
+Need a separate environment? Add `--stage`:
 
-1. **Static analysis** (ts-morph) — reads your exports, extracts handler config from AST
-2. **Bundle** (esbuild) — wraps each handler with a runtime adapter, tree-shaken per function
-3. **Deploy** (AWS SDK) — creates/updates Lambda, API Gateway, DynamoDB, IAM directly
+```bash
+$ npx eff deploy --stage prod
 
-No CloudFormation stacks. No Terraform state. Tags on AWS resources are the only state.
+Deployed 3 handler(s) in 8s:
+  [table] todos    arn:aws:dynamodb:eu-west-1:***:table/todo-app-prod-todos
+  [http]  addTodo  https://xyz789.execute-api.eu-west-1.amazonaws.com/todos
+  [app]   frontend https://xyz789.execute-api.eu-west-1.amazonaws.com/
+```
+
+Fully isolated infrastructure — separate tables, Lambdas, API Gateway. No shared state between stages.
 
 ## Compared to
 

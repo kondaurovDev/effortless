@@ -33,6 +33,7 @@ export default defineConfig({
             { label: "HTTP API", slug: "use-cases/http-api" },
             { label: "Database", slug: "use-cases/database" },
             { label: "Website", slug: "use-cases/web-app" },
+            { label: "Queue", slug: "use-cases/queue" },
           ],
         },
         {
@@ -44,9 +45,10 @@ export default defineConfig({
           ],
         },
         {
-          label: "About",
+          label: "Resources",
           items: [
-            { label: "FAQ", slug: "faq" },
+            { label: "Why AWS?", slug: "why-aws" },
+            { label: "Comparisons", slug: "comparisons" },
             { label: "Roadmap", slug: "roadmap" },
             { label: "CLI Roadmap", slug: "roadmap-cli" },
           ],

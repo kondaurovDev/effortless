@@ -27,8 +27,22 @@ export type {
   FailedRecord
 } from "./define-table";
 
+// FIFO Queue handlers
+export { defineFifoQueue } from "./define-fifo-queue";
+export type {
+  FifoQueueConfig,
+  FifoQueueMessage,
+  FifoQueueHandler,
+  FifoQueueMessageFn,
+  FifoQueueBatchFn,
+  DefineFifoQueueOptions
+} from "./define-fifo-queue";
+
 // Table client
 export type { TableClient, QueryParams } from "../runtime/table-client";
+
+// Helpers
+export { typed } from "./typed";
 
 // Permissions
 export type { Permission } from "./permissions";

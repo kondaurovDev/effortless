@@ -44,13 +44,13 @@ export const createPayment = defineHttp({
   },
 });
 
-export const processOrders = defineQueue({
-  messageSchema: OrderSchema,
+export const processOrders = defineFifoQueue({
+  schema: Schema.decodeUnknownSync(OrderSchema),
   idempotency: {
     key: (msg) => msg.orderId,
     ttl: "24 hours",
   },
-  handler: async (messages) => {
+  onMessage: async ({ message }) => {
     // each message is deduplicated by orderId
   },
 });
@@ -234,15 +234,13 @@ export const api = defineHttp({
 **Approach**: `define*` returns an object that serves as both a deployment descriptor and a typed runtime client. Use it directly — effortless detects the dependency at build time and wires everything.
 
 ```typescript
-export const processOrder = defineQueue({
-  messageSchema: Schema.Struct({
+export const processOrder = defineFifoQueue({
+  schema: Schema.decodeUnknownSync(Schema.Struct({
     orderId: Schema.String,
     amount: Schema.Number,
-  }),
-  handler: async (messages) => {
-    for (const msg of messages) {
-      await fulfillOrder(msg.orderId, msg.amount);
-    }
+  })),
+  onMessage: async ({ message }) => {
+    await fulfillOrder(message.body.orderId, message.body.amount);
   },
 });
 
@@ -275,18 +273,18 @@ The same pattern applies to all resource types:
 
 **Problem**: When queue messages fail processing, they either retry infinitely or disappear. Setting up a Dead Letter Queue manually requires creating a second SQS queue, configuring redrive policy, and wiring a separate Lambda to process failures.
 
-**Approach**: `defineQueue` supports batch processing (like DynamoDB streams) and declarative DLQ configuration. Use `onMessage` for per-message processing or `onBatch` for the entire batch — they are mutually exclusive.
+**Approach**: `defineFifoQueue` already supports `onMessage` (per-message, with partial batch failures) and `onBatch` (entire batch). DLQ adds declarative dead-letter configuration on top.
 
 Per-message processing:
 
 ```typescript
-export const processOrder = defineQueue({
-  messageSchema: OrderSchema,
+export const processOrder = defineFifoQueue({
+  schema: Schema.decodeUnknownSync(OrderSchema),
   batchSize: 10,
-  batchWindow: "30 seconds",
+  batchWindow: 30,
   dlq: { maxRetries: 3 },
   onMessage: async ({ message }) => {
-    await fulfillOrder(message);
+    await fulfillOrder(message.body);
   },
   onFailed: async ({ failures }) => {
     await alertOpsTeam(failures);
@@ -297,13 +295,13 @@ export const processOrder = defineQueue({
 Batch processing:
 
 ```typescript
-export const importProducts = defineQueue({
-  messageSchema: ProductSchema,
-  batchSize: 100,
-  batchWindow: "60 seconds",
+export const importProducts = defineFifoQueue({
+  schema: Schema.decodeUnknownSync(ProductSchema),
+  batchSize: 10,
+  batchWindow: 60,
   dlq: { maxRetries: 3 },
   onBatch: async ({ messages }) => {
-    await db.bulkInsert(messages);
+    await db.bulkInsert(messages.map(m => m.body));
   },
 });
 ```

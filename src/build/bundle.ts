@@ -10,6 +10,7 @@ import type { HttpConfig } from "~/handlers/define-http";
 import type { TableConfig } from "~/handlers/define-table";
 import type { AppConfig } from "~/handlers/define-app";
 import type { StaticSiteConfig } from "~/handlers/define-static-site";
+import type { FifoQueueConfig } from "~/handlers/define-fifo-queue";
 
 export type BundleInput = {
   projectDir: string;
@@ -35,6 +36,11 @@ export const extractAppConfigs = (source: string): ExtractedAppFunction[] =>
 
 export const extractStaticSiteConfigs = (source: string): ExtractedStaticSiteFunction[] =>
   extractHandlerConfigs<StaticSiteConfig>(source, "staticSite");
+
+export type ExtractedFifoQueueFunction = ExtractedConfig<FifoQueueConfig>;
+
+export const extractFifoQueueConfigs = (source: string): ExtractedFifoQueueFunction[] =>
+  extractHandlerConfigs<FifoQueueConfig>(source, "fifoQueue");
 
 export const extractConfig = (source: string): HttpConfig | null => {
   const configs = extractConfigs(source);
@@ -151,6 +157,7 @@ export type DiscoveredHandlers = {
   tableHandlers: { file: string; exports: ExtractedTableFunction[] }[];
   appHandlers: { file: string; exports: ExtractedAppFunction[] }[];
   staticSiteHandlers: { file: string; exports: ExtractedStaticSiteFunction[] }[];
+  fifoQueueHandlers: { file: string; exports: ExtractedFifoQueueFunction[] }[];
 };
 
 export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
@@ -158,6 +165,7 @@ export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
   const tableHandlers: { file: string; exports: ExtractedTableFunction[] }[] = [];
   const appHandlers: { file: string; exports: ExtractedAppFunction[] }[] = [];
   const staticSiteHandlers: { file: string; exports: ExtractedStaticSiteFunction[] }[] = [];
+  const fifoQueueHandlers: { file: string; exports: ExtractedFifoQueueFunction[] }[] = [];
 
   for (const file of files) {
     // Skip directories
@@ -168,12 +176,14 @@ export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
     const table = extractTableConfigs(source);
     const app = extractAppConfigs(source);
     const staticSite = extractStaticSiteConfigs(source);
+    const fifoQueue = extractFifoQueueConfigs(source);
 
     if (http.length > 0) httpHandlers.push({ file, exports: http });
     if (table.length > 0) tableHandlers.push({ file, exports: table });
     if (app.length > 0) appHandlers.push({ file, exports: app });
     if (staticSite.length > 0) staticSiteHandlers.push({ file, exports: staticSite });
+    if (fifoQueue.length > 0) fifoQueueHandlers.push({ file, exports: fifoQueue });
   }
 
-  return { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers };
+  return { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers };
 };

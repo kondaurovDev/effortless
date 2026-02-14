@@ -57,15 +57,13 @@ export default defineConfig({
 Any config option can be overridden per handler:
 
 ```typescript
-export const handler = onQueue({
+export const processor = defineFifoQueue({
   name: "heavy-processing",
   memory: 1024,  // override default
-  timeout: "5 minutes",
-  env: {
-    SPECIAL_VAR: "value",  // merged with global env
-  },
+  timeout: 300,  // 5 minutes
   permissions: [
     "sqs:*",  // added to global permissions
   ],
-}, async (messages) => { ... });
+  onMessage: async ({ message }) => { ... },
+});
 ```

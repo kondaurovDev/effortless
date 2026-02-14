@@ -32,7 +32,7 @@ export type ErrorEntry = {
 export type ExecutionLogEntity = BasePlatformEntity & {
   type: "execution-log";
   handlerName: string;
-  handlerType: "http" | "table";
+  handlerType: "http" | "table" | "app" | "fifo-queue";
   executions: ExecutionEntry[];
   errors: ErrorEntry[];
 };

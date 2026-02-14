@@ -5,9 +5,7 @@ description: Build REST APIs with defineHttp — routes, validation, database ac
 
 You need a backend API. Maybe it's a mobile app that fetches data, a webhook endpoint for a third-party service, or a simple CRUD API for your side project. You don't want to set up Express, configure Docker, or manage a server.
 
-Under the hood, Effortless uses [API Gateway HTTP API](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) — one of the best managed services on AWS. It handles TLS, routing, throttling, and scales to thousands of requests per second with zero configuration. The first 1 million requests per month are free, then $1 per million after that. No servers to patch, no load balancers to configure, no uptime to worry about.
-
-With `defineHttp` you write an async function, export it, and get a production endpoint backed by API Gateway + Lambda.
+With `defineHttp` you write an async function, export it, and get a production endpoint backed by [API Gateway + Lambda](/why-aws/).
 
 ## A simple endpoint
 
@@ -76,13 +74,14 @@ With Effortless, you define the table and reference it in your HTTP handler via 
 
 ```typescript
 // src/tasks.ts
-import { defineTable, defineHttp } from "effortless-aws";
+import { defineTable, defineHttp, typed } from "effortless-aws";
 import { Schema } from "effect";
 
 type Task = { id: string; title: string; done: boolean; createdAt: string };
 
-export const tasks = defineTable<Task>({
+export const tasks = defineTable({
   pk: { name: "id", type: "string" },
+  schema: typed<Task>(),
 });
 
 // POST /tasks — create a task

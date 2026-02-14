@@ -1,6 +1,6 @@
 ---
 title: Handlers
-description: All handler types — defineHttp, defineTable, defineApp, defineStaticSite, defineQueue, defineSchedule, defineEvent, defineS3.
+description: All handler types — defineHttp, defineTable, defineApp, defineStaticSite, defineFifoQueue, defineSchedule, defineEvent, defineS3.
 ---
 
 | Handler | Status |
@@ -9,10 +9,64 @@ description: All handler types — defineHttp, defineTable, defineApp, defineSta
 | [defineTable](#definetable) | Available |
 | [defineApp](#defineapp) | Available |
 | [defineStaticSite](#definestaticsite) | Available |
-| [defineQueue](#definequeue) | Planned |
+| [defineFifoQueue](#definefifoqueue) | Available |
 | [defineSchedule](#defineschedule) | Planned |
 | [defineEvent](#defineevent) | Planned |
 | [defineS3](#defines3) | Planned |
+
+---
+
+## Type inference
+
+Every handler function (`defineHttp`, `defineTable`, `defineFifoQueue`) uses TypeScript generics internally to connect types across `schema`, `context`, `deps`, `params`, and callbacks. You don't need to specify these generics yourself — TypeScript infers them automatically from the options you pass.
+
+Use `schema` to provide the data type. For type-only schemas (no runtime validation), use the `typed<T>()` helper:
+
+```typescript
+import { defineTable, defineHttp, defineFifoQueue, typed, param } from "effortless-aws";
+
+type Order = { id: string; amount: number; status: string };
+
+export const orders = defineTable({
+  pk: { name: "id", type: "string" },
+  schema: typed<Order>(),          // T = Order — inferred from schema
+  params: {
+    threshold: param("threshold", Number),
+  },
+  context: async ({ params }) => ({  // C = { db: Pool } — inferred from return type
+    db: createPool(params.threshold),
+  }),
+  deps: { users },                   // D — inferred from deps object
+  onRecord: async ({ record, ctx, deps, params }) => {
+    // record.new is Order | undefined
+    // ctx is { db: Pool }
+    // deps.users is TableClient<User>
+    // params.threshold is number
+    // Everything is typed — no manual generics needed
+  },
+});
+```
+
+:::caution[Avoid explicit generics]
+Don't write `defineTable<Order>(...)` or `defineFifoQueue<Event>(...)`. When you specify even one generic parameter explicitly, TypeScript stops inferring the rest — `context`, `deps`, and `params` lose their types. Always use `schema` instead.
+:::
+
+For runtime validation (e.g., stream records or message bodies), pass a real validation function:
+
+```typescript
+export const payments = defineFifoQueue({
+  schema: (input: unknown) => {
+    const obj = input as Record<string, unknown>;
+    if (typeof obj?.paymentId !== "string") throw new Error("paymentId required");
+    if (typeof obj?.amount !== "number") throw new Error("amount required");
+    return { paymentId: obj.paymentId, amount: obj.amount };
+  },
+  // T inferred as { paymentId: string; amount: number }
+  onMessage: async ({ message }) => {
+    // message.body is validated at runtime AND typed at compile time
+  },
+});
+```
 
 ---
 
@@ -101,42 +155,60 @@ Dependencies are auto-wired: the framework sets environment variables, IAM permi
 Creates: DynamoDB Table + (optional) Stream + Lambda + Event Source Mapping
 
 ```typescript
-type Order = {
-  id: string;
-  createdAt: number;
-  amount: number;
-};
-
-export const orders = defineTable<Order>({
+export const orders = defineTable({
   // Required
   pk: { name: string, type: "string" | "number" | "binary" },
 
-  // Optional - table
+  // Optional — type inference
+  schema?: (input: unknown) => T,     // infers record type T (or use typed<T>())
+
+  // Optional — table
   name?: string,                      // defaults to export name
   sk?: { name: string, type: "string" | "number" | "binary" },
   billingMode?: "PAY_PER_REQUEST" | "PROVISIONED",  // default: PAY_PER_REQUEST
   ttlAttribute?: string,
 
-  // Optional - stream
+  // Optional — stream
   streamView?: "NEW_AND_OLD_IMAGES" | "NEW_IMAGE" | "OLD_IMAGE" | "KEYS_ONLY",  // default: NEW_AND_OLD_IMAGES
   batchSize?: number,                // 1-10000, default: 100
   startingPosition?: "LATEST" | "TRIM_HORIZON",  // default: LATEST
 
-  // Optional - lambda
+  // Optional — lambda
   memory?: number,
   timeout?: DurationInput,
   permissions?: Permission[],         // additional IAM permissions
   context?: () => C,                  // factory for dependencies (cached on cold start)
   deps?: { [key]: TableHandler },     // inter-handler dependencies
+  params?: { [key]: param(...) },     // SSM parameters
 
   // Stream handler — choose one mode:
 
   // Mode 1: per-record processing
-  onRecord: async ({ record, table, ctx, deps }) => { ... },
-  onBatchComplete?: async ({ results, failures, table, ctx, deps }) => { ... },
+  onRecord: async ({ record, table, ctx, deps, params }) => { ... },
+  onBatchComplete?: async ({ results, failures, table, ctx, deps, params }) => { ... },
 
   // Mode 2: batch processing
-  onBatch: async ({ records, table, ctx, deps }) => { ... },
+  onBatch: async ({ records, table, ctx, deps, params }) => { ... },
+});
+```
+
+Use `schema` or `typed<T>()` to provide the record type. This enables TypeScript to infer all generic parameters from the options object — no need for explicit generics like `defineTable<Order>(...)`.
+
+```typescript
+import { defineTable, typed } from "effortless-aws";
+
+type Order = { id: string; amount: number; status: string };
+
+// Option 1: typed<T>() — type-only, no runtime validation
+export const orders = defineTable({
+  pk: { name: "id", type: "string" },
+  schema: typed<Order>(),
+});
+
+// Option 2: schema function — with runtime validation
+export const orders = defineTable({
+  pk: { name: "id", type: "string" },
+  schema: Schema.decodeUnknownSync(OrderSchema),
 });
 ```
 
@@ -154,8 +226,9 @@ All stream callbacks (`onRecord`, `onBatch`, `onBatchComplete`) receive:
 ### Per-record processing
 
 ```typescript
-export const orders = defineTable<Order>({
+export const orders = defineTable({
   pk: { name: "id", type: "string" },
+  schema: typed<Order>(),
   onRecord: async ({ record, table }) => {
     if (record.eventName === "INSERT") {
       // table is TableClient<Order> — write back to the same table
@@ -170,8 +243,9 @@ Each record is processed individually. If one fails, only that record is retried
 ### Batch processing
 
 ```typescript
-export const events = defineTable<Event>({
+export const events = defineTable({
   pk: { name: "id", type: "string" },
+  schema: typed<Event>(),
   onBatch: async ({ records, table }) => {
     // Process all records at once
     for (const r of records) {
@@ -201,8 +275,9 @@ TableClient<T>
 ```typescript
 import { users } from "./users.js";
 
-export const orders = defineTable<Order>({
+export const orders = defineTable({
   pk: { name: "id", type: "string" },
+  schema: typed<Order>(),
   deps: { users },
   onRecord: async ({ record, table, deps }) => {
     // deps.users is TableClient<User>
@@ -215,8 +290,9 @@ export const orders = defineTable<Order>({
 ### Batch accumulation
 
 ```typescript
-export const ordersWithBatch = defineTable<Order>({
+export const ordersWithBatch = defineTable({
   pk: { name: "id", type: "string" },
+  schema: typed<Order>(),
   onRecord: async ({ record }) => {
     // Return value is collected into results array
     return { id: record.new!.id, amount: record.new!.amount };
@@ -234,13 +310,14 @@ export const ordersWithBatch = defineTable<Order>({
 ```typescript
 // Just creates the DynamoDB table — no stream, no Lambda
 export const users = defineTable({
-  pk: { name: "id", type: "string" }
+  pk: { name: "id", type: "string" },
+  schema: typed<User>(),
 });
 ```
 
 **Built-in best practices**:
 - **Partial batch failures** — each record is processed individually. If one fails, only that record is retried via `PartialBatchResponse`. The rest of the batch succeeds.
-- **Typed records** — the generic `defineTable<Order>` gives you typed `record.new` and `record.old` with automatic DynamoDB unmarshalling.
+- **Typed records** — use `schema: typed<Order>()` for type inference, or a validation function for runtime checks. Gives you typed `record.new` and `record.old` with automatic DynamoDB unmarshalling.
 - **Table self-client** — `table` arg provides a typed `TableClient<T>` for the handler's own table, auto-injected with no config.
 - **Typed dependencies** — `deps` provides typed `TableClient<T>` instances for other tables with auto-wired IAM and env vars.
 - **Batch accumulation** — `onRecord` return values are collected into `results` for `onBatchComplete`. Use this for bulk writes, aggregations, or reporting.
@@ -340,35 +417,135 @@ export const dashboard = defineStaticSite({
 
 ---
 
-## defineQueue
+## defineFifoQueue
 
-> **Status: Planned** — not yet implemented.
-
-Creates: SQS Queue + Lambda + Event Source Mapping + IAM permissions
+Creates: SQS FIFO Queue + Lambda + Event Source Mapping + IAM permissions
 
 ```typescript
-export const handler = defineQueue({
-  // Optional
-  name?: string,                      // defaults to export name
-  memory?: number,                    // MB, default from config
-  timeout?: DurationInput,            // e.g. "30 seconds"
-  batchSize?: number,                 // 1-10, default 10
-  visibilityTimeout?: DurationInput,  // default "30 seconds"
-  messageSchema?: Schema.Schema<T>,   // for type-safe messages
-  fifo?: boolean,                     // FIFO queue
-  deadLetterQueue?: boolean | string, // enable DLQ or reference existing
+export const orderQueue = defineFifoQueue({
+  // Optional — queue
+  name?: string,                        // defaults to export name
+  batchSize?: number,                   // 1-10, default: 10
+  batchWindow?: number,                 // seconds (0-300), default: 0
+  visibilityTimeout?: number,           // seconds (default: max of timeout or 30)
+  retentionPeriod?: number,             // seconds (60-1209600, default: 345600 = 4 days)
+  contentBasedDeduplication?: boolean,  // default: true
 
-  handler: async (messages: T[], ctx: QueueContext) => {
-    // messages are already parsed and validated
-    // ctx contains raw event, AWS context, logger
-  }
+  // Optional — lambda
+  memory?: number,
+  timeout?: number,
+  permissions?: Permission[],           // additional IAM permissions
+  schema?: (input: unknown) => T,       // validate & parse message body
+  context?: () => C,                    // factory for dependencies (cached on cold start)
+  deps?: { [key]: TableHandler },       // inter-handler dependencies
+  params?: { [key]: param(...) },       // SSM parameters
+
+  // Handler — choose one mode:
+
+  // Mode 1: per-message processing
+  onMessage: async ({ message, ctx, deps, params }) => { ... },
+
+  // Mode 2: batch processing
+  onBatch: async ({ messages, ctx, deps, params }) => { ... },
 });
 ```
 
-**Planned best practices**:
-- **Partial batch failures** — if one message fails, only that message is retried. The rest of the batch succeeds.
-- **Typed messages** — when `messageSchema` is set, messages are parsed and validated before your handler runs. Invalid messages are reported as failures automatically.
-- **Auto-infrastructure** — SQS queue, Lambda, event source mapping, and IAM permissions are all created on deploy from this single definition.
+### Callback arguments
+
+All queue callbacks (`onMessage`, `onBatch`) receive:
+
+| Arg | Type | Description |
+|-----|------|-------------|
+| `message` / `messages` | `FifoQueueMessage<T>` / `FifoQueueMessage<T>[]` | Parsed messages with typed `body` |
+| `ctx` | `C` | Context from `context()` factory (if provided) |
+| `deps` | `{ [key]: TableClient }` | Typed clients for dependent tables (if `deps` is set) |
+| `params` | `ResolveParams<P>` | SSM parameter values (if `params` is set) |
+
+The `FifoQueueMessage<T>` object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `messageId` | `string` | Unique message identifier |
+| `body` | `T` | Parsed body (JSON-decoded, then optionally schema-validated) |
+| `rawBody` | `string` | Raw unparsed message body string |
+| `messageGroupId` | `string` | FIFO ordering key |
+| `messageDeduplicationId` | `string?` | Deduplication ID |
+| `receiptHandle` | `string` | Receipt handle for acknowledgement |
+| `messageAttributes` | `Record<string, ...>` | SQS message attributes |
+
+### Per-message processing
+
+```typescript
+type OrderEvent = { orderId: string; action: string };
+
+export const orderQueue = defineFifoQueue({
+  schema: typed<OrderEvent>(),
+  onMessage: async ({ message }) => {
+    console.log(`Order ${message.body.orderId}: ${message.body.action}`);
+    await processOrder(message.body);
+  },
+});
+```
+
+Each message is processed individually. If one fails, only that message is retried via `batchItemFailures`. The rest of the batch succeeds.
+
+### Batch processing
+
+```typescript
+export const notifications = defineFifoQueue({
+  schema: typed<Notification>(),
+  batchSize: 5,
+  onBatch: async ({ messages }) => {
+    await sendAll(messages.map(m => m.body));
+  },
+});
+```
+
+All messages in a batch are processed together. If the handler throws, all messages are reported as failed.
+
+### Schema validation
+
+```typescript
+export const events = defineFifoQueue({
+  schema: (input) => {
+    const obj = input as any;
+    if (!obj?.eventType) throw new Error("eventType is required");
+    return { eventType: obj.eventType as string, payload: obj.payload };
+  },
+  onMessage: async ({ message }) => {
+    // message.body is typed: { eventType: string; payload: unknown }
+  },
+});
+```
+
+When `schema` throws, the message is reported as a batch item failure automatically.
+
+### Dependencies
+
+```typescript
+import { orders } from "./orders.js";
+
+export const orderProcessor = defineFifoQueue({
+  schema: typed<OrderEvent>(),
+  deps: { orders },
+  onMessage: async ({ message, deps }) => {
+    // deps.orders is TableClient<Order>
+    await deps.orders.put({ id: message.body.orderId, status: "processing" });
+  },
+});
+```
+
+Dependencies are auto-wired: the framework sets environment variables, IAM permissions, and provides typed `TableClient` instances at runtime.
+
+**Built-in best practices**:
+- **Partial batch failures** — each message is processed individually (`onMessage` mode). If one fails, only that message is retried via `batchItemFailures`. The rest of the batch succeeds.
+- **FIFO ordering** — messages within the same `messageGroupId` are delivered in order. Use message groups to partition work while maintaining ordering guarantees.
+- **Content-based deduplication** — enabled by default. SQS uses the message body hash to prevent duplicates within the 5-minute deduplication interval.
+- **Typed messages** — use `schema: typed<OrderEvent>()` or a validation function for typed `message.body` with automatic JSON parsing.
+- **Schema validation** — when `schema` is set, each message body is validated before your handler runs. Invalid messages are automatically reported as failures.
+- **Typed dependencies** — `deps` provides typed `TableClient<T>` instances for DynamoDB tables with auto-wired IAM and env vars.
+- **Cold start optimization** — the `context` factory runs once and is cached across invocations.
+- **Auto-infrastructure** — SQS FIFO queue, Lambda, event source mapping, and IAM permissions are all created on deploy from this single definition.
 
 ---
 

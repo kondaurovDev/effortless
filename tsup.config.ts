@@ -44,6 +44,7 @@ export default defineConfig([
       "runtime/wrap-http": "src/runtime/wrap-http.ts",
       "runtime/wrap-table-stream": "src/runtime/wrap-table-stream.ts",
       "runtime/wrap-app": "src/runtime/wrap-app.ts",
+      "runtime/wrap-fifo-queue": "src/runtime/wrap-fifo-queue.ts",
     },
     format: ["esm"],
     dts: false,
