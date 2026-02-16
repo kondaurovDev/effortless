@@ -4,6 +4,7 @@ import {
   Aws,
   ensureProjectApi,
   addRouteToApi,
+  removeStaleRoutes,
   makeTags,
   resolveStage,
   type TagContext
@@ -35,7 +36,7 @@ export const deployLambda = ({ input, fn, layerArn, external, depsEnv, depsPermi
     const { exportName, config } = fn;
     const handlerName = config.name ?? exportName;
 
-    const { functionArn } = yield* deployCoreLambda({
+    const { functionArn, status } = yield* deployCoreLambda({
       input,
       exportName,
       handlerName,
@@ -50,7 +51,7 @@ export const deployLambda = ({ input, fn, layerArn, external, depsEnv, depsPermi
       ...(staticGlobs && staticGlobs.length > 0 ? { staticGlobs } : {})
     });
 
-    return { exportName, functionArn, config, handlerName };
+    return { exportName, functionArn, status, config, handlerName };
   });
 
 export const deploy = (input: DeployInput) =>
@@ -74,7 +75,7 @@ export const deploy = (input: DeployInput) =>
       handler: handlerName
     };
 
-    yield* Effect.logInfo(`Deploying ${handlerName} to ${input.region} (${tagCtx.project}/${tagCtx.stage})`);
+    yield* Effect.logDebug(`Deploying ${handlerName} to ${input.region} (${tagCtx.project}/${tagCtx.stage})`);
 
     // Ensure layer exists
     const { layerArn, external } = yield* ensureLayerAndExternal({
@@ -93,7 +94,7 @@ export const deploy = (input: DeployInput) =>
     });
 
     // Setup API Gateway
-    yield* Effect.logInfo("Setting up API Gateway...");
+    yield* Effect.logDebug("Setting up API Gateway...");
     const { apiId } = yield* ensureProjectApi({
       projectName: input.project,
       stage: tagCtx.stage,
@@ -109,7 +110,7 @@ export const deploy = (input: DeployInput) =>
       path: config.path
     });
 
-    yield* Effect.logInfo(`Deployment complete! URL: ${apiUrl}`);
+    yield* Effect.logDebug(`Deployment complete! URL: ${apiUrl}`);
 
     return {
       exportName: fn.exportName,
@@ -135,7 +136,7 @@ export const deployAll = (input: DeployInput) =>
       return yield* Effect.fail(new Error("No defineHttp exports found in source"));
     }
 
-    yield* Effect.logInfo(`Found ${functions.length} HTTP handler(s) to deploy`);
+    yield* Effect.logDebug(`Found ${functions.length} HTTP handler(s) to deploy`);
 
     const tagCtx: TagContext = {
       project: input.project,
@@ -152,7 +153,7 @@ export const deployAll = (input: DeployInput) =>
     });
 
     // Create single API Gateway for project
-    yield* Effect.logInfo("Setting up API Gateway...");
+    yield* Effect.logDebug("Setting up API Gateway...");
     const { apiId } = yield* ensureProjectApi({
       projectName: input.project,
       stage: tagCtx.stage,
@@ -164,6 +165,7 @@ export const deployAll = (input: DeployInput) =>
 
     // Deploy all Lambdas and add routes
     const results: DeployResult[] = [];
+    const activeRouteKeys = new Set<string>();
 
     for (const fn of functions) {
       const { exportName, functionArn, config } = yield* deployLambda({
@@ -172,6 +174,9 @@ export const deployAll = (input: DeployInput) =>
         ...(layerArn ? { layerArn } : {}),
         ...(external.length > 0 ? { external } : {})
       });
+
+      const routeKey = `${config.method} ${config.path}`;
+      activeRouteKeys.add(routeKey);
 
       const { apiUrl: handlerUrl } = yield* addRouteToApi({
         apiId,
@@ -183,10 +188,13 @@ export const deployAll = (input: DeployInput) =>
 
       results.push({ exportName, url: handlerUrl, functionArn });
 
-      yield* Effect.logInfo(`  ${config.method} ${config.path} → ${config.name}`);
+      yield* Effect.logDebug(`  ${config.method} ${config.path} → ${config.name}`);
     }
 
-    yield* Effect.logInfo(`Deployment complete! API: ${apiUrl}`);
+    // Remove routes that no longer have corresponding handlers
+    yield* removeStaleRoutes(apiId, activeRouteKeys);
+
+    yield* Effect.logDebug(`Deployment complete! API: ${apiUrl}`);
 
     return {
       apiId,

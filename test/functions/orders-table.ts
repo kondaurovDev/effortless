@@ -1,5 +1,5 @@
 import { defineTable } from "../../src/handlers/define-table";
-import { param } from "../../src/handlers/param";
+import { param } from "../../src/deploy/shared";
 
 type Order = {
   id: string;

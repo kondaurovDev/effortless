@@ -6,6 +6,7 @@ import { deploy, deployAll, deployTable, deployAllTables, deployProject, type De
 import { findHandlerFiles, discoverHandlers } from "~/build/bundle";
 import { Aws } from "../../aws";
 import { loadConfig, projectOption, stageOption, regionOption, verboseOption, getPatternsFromConfig } from "~/cli/config";
+import { c } from "~/cli/colors";
 
 const deployTargetArg = Args.text({ name: "target" }).pipe(
   Args.withDescription("Handler name or file path to deploy (optional - uses config patterns if not specified)"),
@@ -42,7 +43,7 @@ export const deployCommand = Command.make(
         cloudfront: { region: "us-east-1" },
       });
 
-      const logLevel = verbose ? LogLevel.Debug : LogLevel.Info;
+      const logLevel = verbose ? LogLevel.Debug : LogLevel.Warning;
       const projectDir = process.cwd();
 
       yield* Option.match(target, {
@@ -63,18 +64,30 @@ export const deployCommand = Command.make(
             });
 
             const total = results.httpResults.length + results.tableResults.length + results.appResults.length + results.staticSiteResults.length;
-            yield* Console.log(`\nDeployed ${total} handler(s):`);
-            for (const r of results.httpResults) {
-              yield* Console.log(`  [http] ${r.exportName}: ${r.url}`);
+            yield* Console.log(`\n${c.green(`Deployed ${total} handler(s):`)}`);
+
+            if (results.apiUrl) {
+              yield* Console.log(`\n  API: ${c.cyan(results.apiUrl)}`);
             }
-            for (const r of results.tableResults) {
-              yield* Console.log(`  [table] ${r.exportName}: ${r.tableArn}`);
+
+            const summaryLines: { name: string; line: string }[] = [];
+            for (const r of results.httpResults) {
+              const pathPart = results.apiUrl ? r.url.replace(results.apiUrl, "") : r.url;
+              summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[http]")}  ${c.bold(r.exportName)}  ${c.dim(pathPart)}` });
             }
             for (const r of results.appResults) {
-              yield* Console.log(`  [app] ${r.exportName}: ${r.url}`);
+              const pathPart = results.apiUrl ? r.url.replace(results.apiUrl, "") : r.url;
+              summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[app]")}   ${c.bold(r.exportName)}  ${c.dim(pathPart)}` });
+            }
+            for (const r of results.tableResults) {
+              summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[table]")} ${c.bold(r.exportName)}` });
             }
             for (const r of results.staticSiteResults) {
-              yield* Console.log(`  [site] ${r.exportName}: ${r.url}`);
+              summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[site]")}  ${c.bold(r.exportName)}: ${c.cyan(r.url)}` });
+            }
+            summaryLines.sort((a, b) => a.name.localeCompare(b.name));
+            for (const { line } of summaryLines) {
+              yield* Console.log(line);
             }
           }),
         onSome: (targetValue) =>
@@ -110,17 +123,17 @@ export const deployCommand = Command.make(
               }
 
               if (httpResult) {
-                yield* Console.log(`\nAPI Gateway: ${httpResult.apiUrl}`);
-                yield* Console.log(`Deployed ${httpResult.handlers.length} HTTP handler(s):`);
+                yield* Console.log(`\nAPI Gateway: ${c.cyan(httpResult.apiUrl)}`);
+                yield* Console.log(c.green(`Deployed ${httpResult.handlers.length} HTTP handler(s):`));
                 for (const r of httpResult.handlers) {
-                  yield* Console.log(`  ${r.exportName}: ${r.url}`);
+                  yield* Console.log(`  ${c.bold(r.exportName)}: ${c.cyan(r.url)}`);
                 }
               }
 
               if (tableResults.length > 0) {
-                yield* Console.log(`\nDeployed ${tableResults.length} table handler(s):`);
+                yield* Console.log(c.green(`\nDeployed ${tableResults.length} table handler(s):`));
                 for (const r of tableResults) {
-                  yield* Console.log(`  ${r.exportName}: ${r.tableArn}`);
+                  yield* Console.log(`  ${c.bold(r.exportName)}: ${c.dim(r.tableArn)}`);
                 }
               }
             } else {
@@ -180,24 +193,24 @@ export const deployCommand = Command.make(
                 yield* Console.error(`Error: Handler "${targetValue}" not found`);
                 yield* Console.log("\nAvailable handlers:");
                 for (const { exports } of discovered.httpHandlers) {
-                  for (const { config: c } of exports) {
-                    yield* Console.log(`  [http] ${c.name}`);
+                  for (const { config: cfg } of exports) {
+                    yield* Console.log(`  ${c.cyan("[http]")}  ${cfg.name}`);
                   }
                 }
                 for (const { exports } of discovered.tableHandlers) {
-                  for (const { config: c } of exports) {
-                    yield* Console.log(`  [table] ${c.name}`);
+                  for (const { config: cfg } of exports) {
+                    yield* Console.log(`  ${c.cyan("[table]")} ${cfg.name}`);
                   }
                 }
                 for (const { exports } of discovered.appHandlers) {
-                  for (const { config: c } of exports) {
-                    yield* Console.log(`  [app] ${c.name}`);
+                  for (const { config: cfg } of exports) {
+                    yield* Console.log(`  ${c.cyan("[app]")}   ${cfg.name}`);
                   }
                 }
                 return;
               }
 
-              yield* Console.log(`Found handler "${targetValue}" in ${path.relative(projectDir, foundFile)}`);
+              yield* Console.log(`Found handler ${c.bold(targetValue)} in ${c.dim(path.relative(projectDir, foundFile))}`);
 
               const input = {
                 projectDir,
@@ -210,11 +223,11 @@ export const deployCommand = Command.make(
 
               if (handlerType === "table") {
                 const result = yield* deployTable(input);
-                yield* Console.log(`\nTable deployed: ${result.tableArn}`);
+                yield* Console.log(`\n${c.green("Table deployed:")} ${c.dim(result.tableArn)}`);
               } else {
                 // Both http and app handlers deploy via the same deploy() path
                 const result = yield* deploy(input);
-                yield* Console.log(`\nDeployed: ${result.url}`);
+                yield* Console.log(`\n${c.green("Deployed:")} ${c.cyan(result.url)}`);
               }
             }
           }),

@@ -11,18 +11,19 @@ description: How effortless works under the hood — build pipeline, deploy flow
 │                                                         │
 │  effortless.config.ts                                   │
 │  src/                                                   │
-│    ├── expenses.ts    → export processExpenses = ...    │
 │    ├── api.ts         → export getUsers = ...           │
-│    └── jobs.ts        → export dailyReport = ...        │
+│    ├── orders.ts      → export orders = ...             │
+│    ├── expenses.ts    → export processExpenses = ...    │
+│    └── site.ts        → export site = ...               │
 └─────────────────────────────────────────────────────────┘
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────┐
-│                  effortless-aws CLI                  │
+│                    effortless-aws CLI                    │
 │                                                         │
 │  1. Load config (effortless.config.ts)                  │
 │  2. Analyze handlers (ts-morph)                         │
-│     - Find all defineQueue/defineHttp/etc exports               │
+│     - Find all defineHttp/defineTable/etc exports       │
 │     - Extract metadata from handler configs             │
 │  3. Bundle each handler (esbuild)                       │
 │     - Tree-shake, minify                                │
@@ -30,7 +31,7 @@ description: How effortless works under the hood — build pipeline, deploy flow
 │  4. Deploy to AWS (SDK direct calls)                    │
 │     - Create/update IAM roles                           │
 │     - Create/update Lambda functions                    │
-│     - Create/update triggers (SQS, API GW, etc)         │
+│     - Create/update triggers (API GW, SQS, streams)    │
 │     - Wire everything together                          │
 └─────────────────────────────────────────────────────────┘
                           │
@@ -38,88 +39,51 @@ description: How effortless works under the hood — build pipeline, deploy flow
 ┌─────────────────────────────────────────────────────────┐
 │                        AWS                              │
 │                                                         │
-│  Lambda: my-service-dev-processExpenses                 │
-│    ← SQS: my-service-dev-expenses                       │
-│                                                         │
 │  Lambda: my-service-dev-getUsers                        │
 │    ← API Gateway: my-service-dev-api                    │
 │       Route: GET /api/users                             │
 │                                                         │
-│  Lambda: my-service-dev-dailyReport                     │
-│    ← EventBridge: my-service-dev-dailyReport-schedule   │
-│                                                         │
 │  Lambda: my-service-dev-orders                          │
 │    ← DynamoDB Stream: my-service-dev-orders             │
+│                                                         │
+│  Lambda: my-service-dev-processExpenses                 │
+│    ← SQS FIFO: my-service-dev-processExpenses           │
+│                                                         │
+│  Lambda: my-service-dev-site                            │
+│    ← API Gateway: serves static files from ZIP          │
 └─────────────────────────────────────────────────────────┘
 ```
 
-## Package Structure
+---
 
-```
-effortless-aws/
-├── src/
-│   │
-│   ├── aws/                    # AWS operations (3 layers)
-│   │   │
-│   │   ├── clients/            # Layer 1: Low-level SDK wrappers (generated)
-│   │   │   ├── lambda.ts       #   Effect-wrapped AWS SDK calls
-│   │   │   ├── iam.ts          #   Typed errors, service contexts
-│   │   │   ├── dynamodb.ts
-│   │   │   ├── apigatewayv2.ts
-│   │   │   ├── resource-groups-tagging-api.ts
-│   │   │   └── index.ts        #   makeClients() layer factory
-│   │   │
-│   │   ├── lambda.ts           # Layer 2: Resource operations
-│   │   ├── iam.ts              #   ensureLambda, ensureRole, ensureTable...
-│   │   ├── dynamodb.ts         #   Create/update/delete with retry logic
-│   │   ├── apigateway.ts       #   Idempotent operations
-│   │   ├── layer.ts            #   Lambda layer management
-│   │   ├── tags.ts             #   Resource tagging & discovery
-│   │   └── index.ts
-│   │
-│   ├── build/                  # Build phase
-│   │   ├── handler-registry.ts #   Handler type definitions (http, table)
-│   │   ├── bundle.ts           #   esbuild bundling, code transformation
-│   │   └── index.ts
-│   │
-│   ├── deploy/                 # Layer 3: Deployment orchestration
-│   │   ├── shared.ts           #   Common types, deployCoreLambda
-│   │   ├── deploy-http.ts      #   HTTP handler deployment
-│   │   ├── deploy-table.ts     #   DynamoDB table + stream deployment
-│   │   ├── deploy.ts           #   Pattern-based deployment (deployFromPatterns)
-│   │   ├── cleanup.ts          #   Resource deletion
-│   │   └── index.ts
-│   │
-│   ├── handlers/               # User-facing handler definitions
-│   │   ├── define-http.ts      #   defineHttp() + types
-│   │   ├── define-table.ts     #   defineTable() + types
-│   │   ├── param.ts            #   param() helper + ParamRef/ResolveParams types
-│   │   ├── permissions.ts      #   IAM permission types
-│   │   └── index.ts
-│   │
-│   ├── runtime/                # Lambda runtime wrappers (bundled into handlers)
-│   │   ├── wrap-http.ts        #   Parses API GW event, calls handler, formats response
-│   │   ├── wrap-table-stream.ts#   Parses DynamoDB stream event, calls onRecord/onBatch
-│   │   ├── handler-utils.ts    #   Shared: buildDeps(), buildParams()
-│   │   ├── ssm-client.ts       #   SSM GetParameters with lazy init, auto-chunking
-│   │   └── table-client.ts     #   TableClient<T> — typed DynamoDB CRUD client
-│   │
-│   ├── cli/                    # CLI implementation
-│   │   ├── commands/
-│   │   │   ├── deploy.ts       #   eff deploy
-│   │   │   ├── build.ts        #   eff build
-│   │   │   ├── status.ts       #   eff status
-│   │   │   ├── cleanup.ts      #   eff cleanup
-│   │   │   └── layers.ts       #   eff layers
-│   │   ├── config.ts           #   Config loading, CLI options
-│   │   ├── cleanup.ts          #   Legacy cleanup (tag-based)
-│   │   └── index.ts            #   CLI entry point
-│   │
-│   ├── config.ts               # defineConfig() + EffortlessConfig type
-│   └── index.ts                # Public exports
-│
-└── package.json
-```
+## Code Map
+
+Quick reference for navigating the codebase. All paths are relative to `src/`.
+
+| I want to...                            | Look at                                                                  |
+|-----------------------------------------|--------------------------------------------------------------------------|
+| Add a new handler type                  | `handlers/define-*.ts`, `build/handler-registry.ts`, `runtime/wrap-*.ts`, `deploy/deploy-*.ts` |
+| Change how handlers are bundled         | `build/bundle.ts`, `build/handler-registry.ts`                           |
+| Fix deploy behavior                     | `deploy/deploy.ts` (orchestrator), `deploy/shared.ts` (core Lambda)     |
+| Understand AWS resource creation        | `aws/lambda.ts`, `aws/iam.ts`, `aws/dynamodb.ts`, `aws/apigateway.ts`  |
+| Modify runtime behavior                 | `runtime/handler-utils.ts` (shared logic), `runtime/wrap-*.ts` (per-type) |
+| Add a cross-cutting feature             | See [Adding a Feature](#adding-a-cross-cutting-feature) below           |
+| Change generated SDK wrappers           | `scripts/gen-aws-sdk.ts` → generates `aws/clients/*.ts`                 |
+| Understand handler type system          | `handlers/define-http.ts` (generics `T,C,D,P,S` + conditional intersections) |
+
+### Key directories
+
+| Directory            | Role                                                                      |
+|----------------------|---------------------------------------------------------------------------|
+| `handlers/`          | **User-facing API** — `defineHttp`, `defineTable`, `defineFifoQueue`, `defineApp`, `defineStaticSite`, `param` |
+| `build/`             | **Build phase** — ts-morph AST parsing (`handler-registry.ts`) + esbuild bundling (`bundle.ts`) |
+| `deploy/`            | **Deploy phase** — orchestration (`deploy.ts`), core Lambda (`shared.ts`), per-type deployers |
+| `runtime/`           | **Runtime phase** — Lambda wrappers (`wrap-*.ts`), shared utils (`handler-utils.ts`), clients |
+| `aws/`               | **AWS operations** — idempotent resource management (`ensureLambda`, `ensureRole`, `ensureTable`, etc.) |
+| `aws/clients/`       | **SDK layer** — auto-generated Effect wrappers around AWS SDK v3 (never edit by hand) |
+| `cli/commands/`      | **CLI commands** — `deploy`, `build`, `status`, `cleanup`, `layers`      |
+
+---
 
 ## Architecture Layers
 
@@ -127,51 +91,38 @@ effortless-aws/
 ┌─────────────────────────────────────────────────────────────┐
 │                         CLI (eff)                           │
 │  deploy, build, status, cleanup, layers                     │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
+└──────────────────────────────┬──────────────────────────────┘
+                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    deploy/ (Orchestration)                  │
 │                                                             │
-│  deployFromPatterns() ─┬─► deployLambda() ──► addRouteToApi │
-│                        └─► deployTableFunction()            │
-│                                                             │
-│  Responsibilities:                                          │
-│  - Discover handlers in files                               │
-│  - Coordinate build + deploy                                │
-│  - Wire up triggers (API GW routes, DynamoDB streams)       │
-└─────────────────────────────────────────────────────────────┘
-                              │
-              ┌───────────────┼───────────────┐
-              ▼               ▼               ▼
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│  build/         │  │  aws/           │  │  handlers/      │
-│  (Build Phase)  │  │  (AWS Ops)      │  │  (Definitions)  │
-│                 │  │                 │  │                 │
-│  bundle()       │  │  ensureLambda() │  │  defineHttp()   │
-│  zip()          │  │  ensureRole()   │  │  defineTable()  │
-│  transform()    │  │  ensureTable()  │  │                 │
-│  extractConfig()│  │  ensureLayer()  │  │                 │
-└─────────────────┘  └─────────────────┘  └─────────────────┘
-                              │
-                              ▼
+│  deployAll() ─────┬─► deployLambda() ──► addRouteToApi()   │
+│                    ├─► deployTableFunction()                │
+│                    ├─► deployFifoQueueFunction()            │
+│                    └─► deployAppLambda()                    │
+└──────────────────────────────┬──────────────────────────────┘
+               ┌───────────────┼───────────────┐
+               ▼               ▼               ▼
+┌────────────────────┐ ┌────────────────┐ ┌────────────────┐
+│  build/            │ │  aws/          │ │  runtime/      │
+│                    │ │                │ │                │
+│  extractConfigs()  │ │  ensureLambda()│ │  wrapHttp()    │
+│  bundle()          │ │  ensureRole()  │ │  wrapTable()   │
+│  zip()             │ │  ensureTable() │ │  wrapQueue()   │
+│                    │ │  ensureLayer() │ │  buildDeps()   │
+└────────────────────┘ └───────┬────────┘ └────────────────┘
+                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   aws/clients/ (SDK Layer)                  │
+│                   aws/clients/ (Generated SDK Layer)        │
 │                                                             │
-│  lambda.make("create_function", {...})                      │
-│  iam.make("create_role", {...})                             │
-│  dynamodb.make("create_table", {...})                       │
-│                                                             │
-│  - Generated Effect wrappers                                │
-│  - Typed errors (LambdaError, IAMError, etc.)               │
-│  - Service contexts via makeClients()                       │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                        AWS SDK                              │
+│  Effect-wrapped AWS SDK v3 calls with typed errors          │
+│  lambda, iam, dynamodb, apigatewayv2, sqs, s3, ssm, ...    │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+All deploy code uses **Effect.js** — typed errors, composable pipelines, concurrency control via `Effect.gen` + `yield*`.
+
+---
 
 ## Build Pipeline
 
@@ -198,7 +149,7 @@ export const createUser = defineHttp({
 
 ```
 RUNTIME_PROPS = ["onRequest", "onRecord", "onBatch", "onBatchComplete",
-                 "context", "schema", "onError", "deps", "params"]
+                 "onMessage", "context", "schema", "onError", "deps", "params", "static"]
 ```
 
 This static config is used by the **deploy phase** to configure AWS resources (API Gateway routes, Lambda memory/timeout, etc.) without needing to execute user code.
@@ -277,358 +228,219 @@ defineHttp({          ┌─► ts-morph extracts static config ─► deploy ph
                            (handler + wrapper + deps)         (uploaded to Lambda)
 ```
 
-## Resource Discovery
+---
 
-The CLI finds existing resources via AWS tags (no local state files). Every deployed resource is tagged:
+## Three-Phase Pattern
 
-```
-effortless:project = my-service
-effortless:stage = dev
-effortless:handler = processExpenses
-effortless:type = lambda | sqs | dynamodb | ...
-```
-
-### Deploy Algorithm
+Every cross-cutting feature (deps, params, static files) follows the same three-phase pattern. Understanding this pattern once lets you understand — or build — any feature.
 
 ```
-deploy:
-  query AWS by tags → get current state
-  compare with handlers in code
-  create/update changed resources
-  tag new resources
-
-deploy --force:
-  query AWS by tags
-  compare with current handlers
-  delete orphaned resources (no matching handler)
-
-destroy:
-  query AWS by tags
-  delete all resources for this project/stage
+Build (ts-morph AST)        Deploy (Effect)              Runtime (Lambda)
+────────────────────        ─────────────────            ──────────────────
+extract<Feature>()    →     resolve<Feature>()     →     build<Feature>()
+reads config from AST       generates EFF_* env vars     reads env vars,
+                            + IAM permissions             initializes clients
+                                    │                            │
+                                    ▼                            ▼
+                            deployCoreLambda()            commonArgs() injects
+                            (env + perms merged)          into handler callback
 ```
 
-## Stage Isolation
+### Feature matrix
 
-Each stage (`dev`, `staging`, `prod`, etc.) is a **fully independent set of AWS resources** with no shared infrastructure between stages. This is a deliberate design decision.
+| Feature | Build function | Extracted data | Deploy function | Env var pattern | Runtime function |
+|---------|---------------|----------------|-----------------|-----------------|------------------|
+| **deps** | `extractDepsKeys()` | `["orders", "users"]` | `resolveDeps()` | `EFF_TABLE_<key>=<tableName>` | `buildDeps()` → `TableClient` per key |
+| **params** | `extractParamEntries()` | `[{propName, ssmKey}]` | `resolveParams()` | `EFF_PARAM_<prop>=/<project>/<stage>/<ssmKey>` | `buildParams()` → batch SSM fetch + transform |
+| **static** | `extractStaticGlobs()` | `["src/templates/*.ejs"]` | `resolveStaticFiles()` | _(files bundled in ZIP)_ | `readStatic()` → `readFileSync` from cwd |
+| **platform** | _(always on)_ | — | `ensurePlatformTable()` | `EFF_PLATFORM_TABLE=<tableName>` | `createPlatformClient()` → fire-and-forget |
+
+All `resolve*` results are combined via `mergeResolved()` into a single `{ env, permissions }` payload before being passed to `deployCoreLambda()`.
+
+---
+
+## Adding a New Handler Type
+
+Use `defineFifoQueue` as a template — it's the most recently added handler type and follows all current patterns.
+
+### Step 1: Handler definition (`handlers/define-<type>.ts`)
+
+- Define a branded type: `{ __brand: "effortless-<type>" }`
+- Define config type with all static properties (name, memory, timeout, etc.)
+- Define callback function types
+- Export `define<Type>()` factory function
+- Thread generics: `<T, C, D, P, S>` for schema, context, deps, params, static
+
+### Step 2: Handler registry (`build/handler-registry.ts`)
+
+- Add entry to `handlerRegistry`:
+  ```typescript
+  <type>: {
+    defineFn: "define<Type>",
+    wrapperFn: "wrap<Type>",
+    wrapperPath: "~/runtime/wrap-<type>",
+    handlerProps: { /* type-specific static props */ },
+  }
+  ```
+- Add handler type to `HandlerType` union
+
+### Step 3: Runtime wrapper (`runtime/wrap-<type>.ts`)
+
+- Export `wrap<Type>(handler)` function
+- Parse the incoming Lambda event into your handler's format
+- Call `createHandlerRuntime()` from `handler-utils.ts` to get shared functionality (context, deps, params, platform logging)
+- Call the user's callback with `rt.commonArgs()` + type-specific args
+- Format and return the Lambda response
+
+### Step 4: Bundle extraction (`build/bundle.ts`)
+
+- Add `extract<Type>Configs()` using `extractHandlerConfigs<Config>(source, "<type>")`
+- Call it from `discoverHandlers()`
+
+### Step 5: Deploy function (`deploy/deploy-<type>.ts`)
+
+- Export `deploy<Type>Function()` — calls `deployCoreLambda()` from `shared.ts`
+- Export `deploy<Type>()` — creates any AWS resources (queue, table, API route) + calls deploy function
+- Handle type-specific wiring (event source mappings, triggers, etc.)
+
+### Step 6: Orchestrator (`deploy/deploy.ts`)
+
+- Add discovery logic in `deployAll()` to find your new handler type
+- Wire into the parallel deployment loop
+- Handle cleanup for the new resource type
+
+---
+
+## Adding a Cross-Cutting Feature
+
+Use `params` as a template — it's a clean example of the three-phase pattern.
+
+### Step 1: Build — AST extraction (`build/handler-registry.ts`)
+
+Add `extract<Feature>()` that reads the feature's config from the handler AST:
+- Use ts-morph to find the property in the handler config object literal
+- Extract serializable data (keys, paths, patterns — not functions)
+- Add the property name to `RUNTIME_PROPS` so it's stripped from static config
+- Store the result in `ExtractedConfig` (add a new field)
+
+### Step 2: Deploy — env vars + IAM (`deploy/deploy.ts` or `deploy/shared.ts`)
+
+Add `resolve<Feature>()` that converts extracted data into Lambda environment:
+- Generate `EFF_<FEATURE>_<key>=<value>` environment variables
+- Collect IAM permissions the feature needs at runtime
+- Return `{ env, permissions }` — `mergeResolved()` will combine with other features
+
+### Step 3: Runtime — lazy init + injection (`runtime/handler-utils.ts`)
+
+Add `build<Feature>()` that reads env vars and initializes at runtime:
+- Read `EFF_<FEATURE>_*` env vars
+- Create clients / fetch data (lazy init, cached in closure)
+- Wire into `commonArgs()` so the feature is injected into handler callbacks
+
+### Step 4: Types — thread the generic
+
+Add a new generic parameter to handler types:
+```typescript
+& ([F] extends [undefined] ? {} : { featureName: ResolveFeature<F> })
+```
+
+This ensures the callback only receives the feature arg when the user configures it.
+
+---
+
+## Resource Discovery & Naming
+
+### Tag-based discovery (no state files)
+
+The CLI finds existing resources via AWS Resource Groups Tagging API. Every deployed resource is tagged:
 
 ```
-eff deploy --stage dev       eff deploy --stage prod
-         │                            │
-         ▼                            ▼
-┌──────────────────────┐   ┌──────────────────────┐
-│  my-app-dev          │   │  my-app-prod         │
-│                      │   │                      │
-│  API Gateway         │   │  API Gateway         │
-│  Lambda functions    │   │  Lambda functions     │
-│  DynamoDB tables     │   │  DynamoDB tables      │
-│  IAM roles           │   │  IAM roles            │
-│  Lambda layer        │   │  Lambda layer         │
-│  Platform table      │   │  Platform table       │
-└──────────────────────┘   └──────────────────────┘
-       (isolated)                 (isolated)
+effortless-project = my-service
+effortless-stage   = dev
+effortless-handler = processExpenses
+effortless-component = lambda | sqs | dynamodb | ...
 ```
 
-### Why not a shared API Gateway with multiple stages?
-
-AWS API Gateway V2 (HTTP API) supports built-in stages, which might seem like a natural way to separate environments. However, sharing an API Gateway across stages has significant drawbacks:
-
-- **Blast radius** — a misconfigured route or a broken deployment on `dev` can affect `prod` if they share the same API Gateway resource.
-- **Throttling and rate limits** — API Gateway limits (requests per second, burst) are shared across all stages of the same API. A load test on `dev` could throttle `prod` traffic.
-- **Stage variables in HTTP API** — API Gateway V2 does not support stage variables in Lambda integrations, so there's no clean way to route the same path to different Lambda functions per stage.
-- **Independent lifecycle** — separate resources can be created, updated, and destroyed independently. Destroying `dev` never risks touching `prod`.
+This means: no `.tfstate`, no CloudFormation stacks, no lock files. The AWS tags **are** the state.
 
 ### Naming convention
 
-All resources include both the project name and stage in their identifiers, ensuring no collisions:
+All resources include project name and stage, ensuring no collisions:
 
-| Resource | Naming pattern |
+| Resource | Pattern |
 |---|---|
 | Lambda function | `${project}-${stage}-${handler}` |
 | IAM role | `${project}-${stage}-${handler}-role` |
 | API Gateway | `${project}-${stage}` |
 | DynamoDB table | `${project}-${stage}-${handler}` |
+| SQS FIFO queue | `${project}-${stage}-${handler}` |
 | Platform table | `${project}-${stage}-platform` |
 | Lambda layer | `${project}-${stage}-deps` |
 
----
+### Stage isolation
 
-## Inter-Handler Dependencies (`deps`)
+Each stage (`dev`, `staging`, `prod`) is a **fully independent set of resources**. No shared infrastructure between stages — separate API Gateways, separate Lambda functions, separate tables. Destroying `dev` never risks touching `prod`.
 
-Handlers can declare dependencies on other handlers. The framework auto-wires environment variables, IAM permissions, and provides typed runtime clients.
-
-### User API
-
-```typescript
-// src/orders.ts
-export const orders = defineTable<Order>({
-  pk: { name: "orderId", type: "string" },
-  onRecord: async ({ record }) => { ... },
-});
-
-// src/api.ts
-import { orders } from "./orders.js";
-
-export const createOrder = defineHttp({
-  method: "POST",
-  path: "/orders",
-  deps: { orders },
-  onRequest: async ({ req, deps }) => {
-    await deps.orders.put({ orderId: "abc-123", amount: 99 });
-    const item = await deps.orders.get({ orderId: "abc-123" });
-    return { status: 201, body: item };
-  },
-});
-```
-
-The `deps` property accepts an object of handler references. TypeScript infers the correct `TableClient<T>` type for each dependency based on the table's generic parameter.
-
-### Type System
+### Deploy algorithm
 
 ```
-ResolveDeps<D>
-  Maps { key: TableHandler<T, ...> } → { key: TableClient<T> }
+deploy:
+  1. discover handlers from code (AST analysis)
+  2. prepare shared dependency layer (hash-based, skip if unchanged)
+  3. create/update resources for each handler (5 concurrent)
+  4. tag all resources
+  5. remove stale API Gateway routes
 
-TableClient<T>
-  ├── put(item: T): Promise<void>
-  ├── get(key: Partial<T>): Promise<T | undefined>
-  ├── delete(key: Partial<T>): Promise<void>
-  ├── query(params): Promise<T[]>
-  └── tableName: string
+cleanup:
+  1. query AWS by tags → find all resources for project+stage
+  2. group by handler
+  3. delete selected resources (--all or --handler <name>)
 ```
-
-Both `defineHttp` and `defineTable` accept a `D` generic parameter for deps. The callback args use conditional types so that `deps` only appears when `D` is not `undefined`:
-
-```typescript
-& ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-```
-
-### Pipeline
-
-The deps feature touches all three phases: build, deploy, and runtime.
-
-```
-Build (ts-morph)          Deploy (Effect)              Runtime (Lambda)
-────────────────          ─────────────────            ──────────────────
-
-extractDepsKeys()    →    buildTableNameMap()     →    buildDeps(handler)
-reads AST to get          maps handler names to        reads EFF_TABLE_<key>
-dep keys: ["orders"]      table names:                 env vars, creates
-                          orders → proj-stg-orders     TableClient instances
-
-                          resolveDeps()
-                          generates env vars:
-                          EFF_TABLE_orders=proj-stg-orders
-                          + DynamoDB IAM permissions
-```
-
-#### Build phase
-
-`extractDepsKeys()` in `handler-registry.ts` reads the `deps` property from the handler config AST. It handles:
-- Shorthand: `deps: { orders }` → reads `ShorthandPropertyAssignment` names
-- Explicit: `deps: { orders: orders }` → reads `PropertyAssignment` names
-
-The `deps` property itself is in `RUNTIME_PROPS` (not serializable), so it's stripped from the static config. Only the extracted key names (`depsKeys: string[]`) are passed to the deploy phase.
-
-#### Deploy phase
-
-1. **`buildTableNameMap()`** — builds a `Map<string, string>` of all table handler export names to their deterministic DynamoDB table names (`${project}-${stage}-${handlerName}`)
-
-2. **`resolveDeps(depsKeys, tableNameMap)`** — for each dep key:
-   - Looks up the table name from the map
-   - Sets env var: `EFF_TABLE_<key> = <tableName>`
-   - Collects DynamoDB IAM permissions (`GetItem`, `PutItem`, `DeleteItem`, `Query`, `Scan`, `UpdateItem`, `BatchWriteItem`)
-   - Returns `{ env, permissions }` which are threaded to `deployCoreLambda()`
-
-3. **`ensureLambda()`** — accepts `environment?: Record<string, string>` to set Lambda environment variables. Detects env changes and updates configuration when needed.
-
-#### Runtime phase
-
-`buildDeps()` in `handler-utils.ts` (shared by both wrappers):
-
-1. Reads `Object.keys(handler.deps)` to find dep names
-2. For each key, reads `process.env[EFF_TABLE_${key}]`
-3. Calls `createTableClient(tableName)` — creates a typed DynamoDB client with lazy SDK initialization
-4. Injects the resulting `deps` object into the handler callback args
-
-The `TableClient` uses the same lazy init pattern as the rest of the runtime: the DynamoDB SDK client is created once on the first call, then reused across invocations (Lambda container reuse).
-
-```
-Lambda cold start:
-  handler.deps = { orders: TableHandler }     (from define-time)
-  process.env.EFF_TABLE_orders = "proj-stg-orders"  (from deploy)
-       │
-       ▼
-  buildDeps(handler)
-       │
-       ▼
-  { orders: TableClient("proj-stg-orders") }  (injected into args.deps)
-       │
-       ▼
-  deps.orders.put({ orderId: "abc", ... })     (user code)
-       │
-       ▼
-  DynamoDB.putItem({ TableName: "proj-stg-orders", Item: ... })
-```
-
-### Table Self-Client (`table` arg)
-
-Table handlers that process stream events often need to write back to their own table. A circular `deps` reference is impossible (`deps: { self: ExpenseTable }` — `ExpenseTable` isn't defined yet), so every table handler callback automatically receives a `table: TableClient<T>` argument — a typed client for its own table.
-
-```typescript
-export const orders = defineTable<Order>({
-  pk: { name: "orderId", type: "string" },
-  onRecord: async ({ record, table }) => {
-    await table.put({ orderId: record.new!.orderId, status: "processed" });
-  }
-});
-```
-
-The `table` arg is always present in `onRecord`, `onBatch`, and `onBatchComplete` — no configuration needed.
-
-**How it works:**
-
-1. **Deploy**: `deploy-table.ts` sets `EFF_TABLE_SELF=<tableName>` on the Lambda environment (merged into the same `depsEnv` mechanism)
-2. **Runtime**: `wrap-table-stream.ts` reads `process.env.EFF_TABLE_SELF`, creates a `TableClient` via `createTableClient()`, and injects it as `table` in callback args
-3. **Lazy init**: same pattern as `deps` — the client is created once on first invocation and reused
 
 ---
 
-## SSM Parameters (`params`)
+## Environment Variables Reference
 
-Handlers can declare SSM Parameter Store values that are automatically fetched, cached, and injected at runtime. The framework handles IAM permissions, environment variable wiring, and batch fetching — following the same build/deploy/runtime pipeline as `deps`.
+Environment variables injected into Lambda functions at deploy time:
 
-### User API
+| Variable | Set by | Purpose |
+|----------|--------|---------|
+| `EFF_PROJECT` | always | Project name from config |
+| `EFF_STAGE` | always | Stage name (default: `dev`) |
+| `EFF_HANDLER` | always | Handler export name |
+| `EFF_TABLE_<key>` | `resolveDeps()` | DynamoDB table name for each dependency |
+| `EFF_TABLE_SELF` | `deploy-table.ts` | Own table name (table stream handlers only) |
+| `EFF_PARAM_<prop>` | `resolveParams()` | SSM path: `/${project}/${stage}/${ssmKey}` |
+| `EFF_QUEUE_URL` | `deploy-fifo-queue.ts` | SQS queue URL (queue handlers only) |
+| `EFF_QUEUE_ARN` | `deploy-fifo-queue.ts` | SQS queue ARN (queue handlers only) |
 
-```typescript
-import { defineHttp, param } from "effortless-aws";
-import TOML from "smol-toml";
+---
 
-export const api = defineHttp({
-  method: "GET",
-  path: "/orders",
-  params: {
-    dbUrl: param("database-url"),                    // → string
-    config: param("app-config", TOML.parse),         // → ReturnType<typeof TOML.parse>
-  },
-  context: async ({ params }) => ({
-    pool: createPool(params.dbUrl),
-  }),
-  onRequest: async ({ req, ctx, params }) => {
-    // params.dbUrl    — string from SSM
-    // params.config   — parsed TOML object
-    // ctx.pool        — created with SSM value
-  },
-});
-```
+## Design Decisions
 
-### Key design decisions
+### No state files
 
-- **No secrets in env vars** — only SSM paths (e.g. `/${project}/${stage}/${key}`) are stored as Lambda environment variables. Actual values are fetched at runtime via `GetParameters`.
-- **Agnostic transforms** — `param(key, transform)` accepts any `(raw: string) => T` function. No built-in parsers — users bring their own (JSON.parse, TOML.parse, etc.).
-- **Cold start caching** — SSM values are fetched once per Lambda cold start and cached in a closure. Subsequent invocations reuse cached values.
-- **Batch fetching** — uses `GetParameters` (not `GetParameter`) from the start. Auto-chunks into batches of 10 (SSM API limit).
-- **`WithDecryption: true`** — always enabled, so `SecureString` parameters work transparently.
+Resources are discovered via AWS tags instead of local state (CloudFormation, Terraform `.tfstate`). This eliminates state file drift, lock conflicts, and the need for remote state backends. The trade-off: tag queries are slower than reading a local file, and tags have a 50-tag-per-resource limit.
 
-### Type System
+### ts-morph for static analysis
 
-```
-ParamRef<T = string>
-  Branded type returned by param(). T defaults to string,
-  inferred from transform: param("key", JSON.parse) → ParamRef<any>
+ts-morph (TypeScript compiler wrapper) is used instead of Babel or regex parsing. It understands TypeScript natively — generic parameters, branded types, and const assertions all work correctly. The downside is it's heavier than Babel, but since it only runs at build time this is acceptable.
 
-ResolveParams<P>
-  Maps { key: ParamRef<T> } → { key: T }
-  e.g. { dbUrl: ParamRef<string>, config: ParamRef<TomlDoc> }
-     → { dbUrl: string, config: TomlDoc }
-```
+### Effect.js for deploy orchestration
 
-The `P` generic uses the same conditional pattern as `D` (deps):
+All deploy code uses [Effect](https://effect.website/) for composable, typed error handling. This gives us: typed errors per AWS operation (`LambdaError`, `IAMError`), automatic retry logic, structured concurrency (parallel deploys with a limit of 5), and clean `gen`/`yield*` syntax. The learning curve is steep, but deploy code is write-once and rarely changes.
 
-```typescript
-& ([P] extends [undefined] ? {} : { params: ResolveParams<P> })
-```
+### Separate stages, no shared resources
 
-Context factory type is conditional on `P`:
+Each stage gets its own API Gateway, Lambda functions, tables, etc. AWS API Gateway V2 doesn't support stage variables in Lambda integrations, and sharing resources means shared rate limits and blast radius. Full isolation is simpler and safer.
 
-```typescript
-type ContextFactory<C, P> =
-  [P] extends [undefined]
-    ? () => C | Promise<C>                              // no params
-    : (args: { params: ResolveParams<P> }) => C | Promise<C>  // with params
-```
+### No secrets in environment variables
 
-### Pipeline
+For SSM parameters, only the **path** (e.g. `/${project}/${stage}/db-url`) is stored as a Lambda env var. Actual secret values are fetched at runtime via `GetParameters` with `WithDecryption: true`. This means secrets never appear in Lambda console, CloudFormation outputs, or deployment logs.
 
-```
-Build (ts-morph)            Deploy (Effect)                Runtime (Lambda)
-────────────────            ─────────────────              ──────────────────
+### Deterministic builds
 
-extractParamEntries()  →    resolveParams()           →    buildParams(handler)
-reads param("key")          generates env vars:            reads EFF_PARAM_<prop>
-calls from AST              EFF_PARAM_dbUrl=               env vars, batch-fetches
-→ [{propName, ssmKey}]      /proj/stg/database-url         SSM, applies transforms
-
-                                                           mergeResolved()
-                            mergeResolved()                 combines deps + params
-                            combines deps + params          into single env/perms
-                            env/perms for Lambda
-```
-
-#### Build phase
-
-`extractParamEntries()` in `handler-registry.ts` reads the `params` property from the handler config AST. For each property, it finds a `CallExpression` to `param()` and extracts the first `StringLiteral` argument as the SSM key.
-
-```typescript
-params: {
-  dbUrl: param("database-url"),        // → { propName: "dbUrl", ssmKey: "database-url" }
-  config: param("app-config", fn),     // → { propName: "config", ssmKey: "app-config" }
-}
-```
-
-The `params` property is in `RUNTIME_PROPS`, so it's stripped from static config. Only `paramEntries: ParamEntry[]` is passed to deploy.
-
-#### Deploy phase
-
-1. **`resolveParams(paramEntries, project, stage)`** — for each param entry:
-   - Sets env var: `EFF_PARAM_<propName> = /${project}/${stage}/${ssmKey}`
-   - Collects SSM IAM permissions (`ssm:GetParameter`, `ssm:GetParameters`)
-
-2. **`mergeResolved(deps, params)`** — combines deps and params env/permissions into a single payload passed to `deployCoreLambda()`. This avoids changes to the core deploy types.
-
-#### Runtime phase
-
-`buildParams()` in `handler-utils.ts`:
-
-1. Reads `EFF_PARAM_*` environment variables to get SSM paths
-2. Batch-fetches all values via `getParameters()` from `ssm-client.ts`
-3. Applies transform functions from `handler.params[key].transform` if present
-4. Returns resolved params object, cached in closure for subsequent invocations
-
-```
-Lambda cold start:
-  handler.params = { dbUrl: ParamRef }              (from define-time)
-  process.env.EFF_PARAM_dbUrl = "/proj/stg/db-url"  (from deploy)
-       │
-       ▼
-  buildParams(handler.params)
-       │
-       ▼
-  SSM.getParameters(["/proj/stg/db-url"])            (batch fetch, once)
-       │
-       ▼
-  { dbUrl: "postgres://..." }                        (cached in closure)
-       │
-       ▼
-  params.dbUrl                                       (injected into args)
-```
-
-Context factory receives params before handler invocation, enabling DI patterns:
-
-```typescript
-context: async ({ params }) => ({
-  pool: createPool(params.dbUrl),  // pool created once per cold start
-})
-```
+ZIP files use `FIXED_DATE = new Date(0)` for all entries. Same source code produces the same ZIP hash, so `ensureLambda()` can skip re-upload when only timestamps changed. This makes deploys fast when only one handler changes.
 
 ---
 
@@ -682,11 +494,6 @@ ensureLayer()
 
 Layers are versioned by a SHA-256 hash of all `package@version` pairs. If the hash matches an existing published layer version, it's reused — no re-upload needed. This makes deploys fast when only handler code changes.
 
-```
-Layer name:    ${project}-${stage}-deps
-Description:   effortless deps layer hash:abc12345
-```
-
 ### AWS SDK Handling
 
 AWS SDK v3 packages (`@aws-sdk/*`, `@smithy/*`) are **always excluded** from both the layer and the handler bundle. They're provided by the Lambda Node.js runtime, which keeps the layer size small and avoids version conflicts.
@@ -695,8 +502,8 @@ AWS SDK v3 packages (`@aws-sdk/*`, `@smithy/*`) are **always excluded** from bot
 
 ## Prior Art
 
-- [Firebase Functions](https://firebase.google.com/docs/functions) - inspiration for DX
-- [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) - inspiration for runtime best practices (batch processing, idempotency, structured logging, metrics, tracing)
-- [SST](https://sst.dev/) - infrastructure from code for AWS
-- [Nitric](https://nitric.io/) - cloud-agnostic declarative framework
-- [Pulumi](https://www.pulumi.com/) - infrastructure as code
+- [Firebase Functions](https://firebase.google.com/docs/functions) — inspiration for DX
+- [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) — inspiration for runtime best practices (batch processing, idempotency, structured logging, metrics, tracing)
+- [SST](https://sst.dev/) — infrastructure from code for AWS
+- [Nitric](https://nitric.io/) — cloud-agnostic declarative framework
+- [Pulumi](https://www.pulumi.com/) — infrastructure as code

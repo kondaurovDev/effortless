@@ -1,6 +1,6 @@
 import { defineHttp } from "../../src/handlers/define-http";
 import { defineTable } from "../../src/handlers/define-table";
-import { param } from "../../src/handlers/param";
+import { param } from "../../src/deploy/shared";
 import { Effect, pipe } from "effect";
 import * as S from "effect/Schema";
 

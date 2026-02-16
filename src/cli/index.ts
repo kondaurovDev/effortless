@@ -5,13 +5,13 @@ import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect } from "effect";
 
 import { deployCommand } from "./commands/deploy";
-import { buildCommand } from "./commands/build";
 import { statusCommand } from "./commands/status";
-import { cleanupCommand, cleanupRolesCommand } from "./commands/cleanup";
-import { layersCommand } from "./commands/layers";
+import { cleanupCommand } from "./commands/cleanup";
+import { logsCommand } from "./commands/logs";
+import { layerCommand } from "./commands/layer";
 
 const mainCommand = Command.make("eff").pipe(
-  Command.withSubcommands([deployCommand, buildCommand, statusCommand, cleanupCommand, cleanupRolesCommand, layersCommand]),
+  Command.withSubcommands([deployCommand, statusCommand, logsCommand, cleanupCommand, layerCommand]),
   Command.withDescription("Code-first AWS Lambda framework")
 );
 

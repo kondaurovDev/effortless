@@ -1,6 +1,5 @@
 import type { HttpHandler, ContentType } from "~/handlers/define-http";
 import { createHandlerRuntime } from "./handler-utils";
-import { truncateForStorage } from "./platform-types";
 
 const CONTENT_TYPE_MAP: Record<ContentType, string> = {
   json: "application/json",
@@ -35,7 +34,7 @@ type LambdaEvent = {
 };
 
 export const wrapHttp = <T, C>(handler: HttpHandler<T, C>) => {
-  const rt = createHandlerRuntime(handler, "http");
+  const rt = createHandlerRuntime(handler, "http", handler.config.logLevel ?? "info");
 
   const toResult = (r: { status: number; body?: unknown; contentType?: ContentType; headers?: Record<string, string> }) => {
     const resolved = r.contentType ? CONTENT_TYPE_MAP[r.contentType] : undefined;
@@ -66,43 +65,48 @@ export const wrapHttp = <T, C>(handler: HttpHandler<T, C>) => {
 
   return async (event: LambdaEvent) => {
     const startTime = Date.now();
+    rt.patchConsole();
 
-    const req = {
-      method: event.requestContext?.http?.method ?? event.httpMethod ?? "GET",
-      path: event.requestContext?.http?.path ?? event.path ?? "/",
-      headers: event.headers ?? {},
-      query: event.queryStringParameters ?? {},
-      params: event.pathParameters ?? {},
-      body: parseBody(event.body, event.isBase64Encoded ?? false),
-      rawBody: event.body,
-    };
+    try {
+      const req = {
+        method: event.requestContext?.http?.method ?? event.httpMethod ?? "GET",
+        path: event.requestContext?.http?.path ?? event.path ?? "/",
+        headers: event.headers ?? {},
+        query: event.queryStringParameters ?? {},
+        params: event.pathParameters ?? {},
+        body: parseBody(event.body, event.isBase64Encoded ?? false),
+        rawBody: event.body,
+      };
 
-    const input = truncateForStorage({ method: req.method, path: req.path, query: req.query, body: req.body });
+      const input = { method: req.method, path: req.path, query: req.query, body: req.body };
 
-    const args: Record<string, unknown> = { req };
-    if (handler.schema) {
+      const args: Record<string, unknown> = { req };
+      if (handler.schema) {
+        try {
+          args.data = handler.schema(req.body);
+        } catch (error) {
+          rt.logError(startTime, input, error);
+          return handler.onError
+            ? toResult(handler.onError(error, req))
+            : defaultError(error, 400);
+        }
+      }
+
+      // Resolve shared args
+      Object.assign(args, await rt.commonArgs());
+
       try {
-        args.data = handler.schema(req.body);
+        const response = await (handler.onRequest as any)(args);
+        rt.logExecution(startTime, input, response.body);
+        return toResult(response);
       } catch (error) {
         rt.logError(startTime, input, error);
         return handler.onError
           ? toResult(handler.onError(error, req))
-          : defaultError(error, 400);
+          : defaultError(error, 500);
       }
-    }
-
-    // Resolve shared args
-    Object.assign(args, await rt.commonArgs());
-
-    try {
-      const response = await (handler.onRequest as any)(args);
-      rt.logExecution(startTime, input, response.body);
-      return toResult(response);
-    } catch (error) {
-      rt.logError(startTime, input, error);
-      return handler.onError
-        ? toResult(handler.onError(error, req))
-        : defaultError(error, 500);
+    } finally {
+      rt.restoreConsole();
     }
   };
 };

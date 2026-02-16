@@ -1,7 +1,6 @@
-import type { Permission } from "./permissions";
+import type { LambdaWithPermissions, AnyParamRef, ResolveParams } from "../deploy/shared";
 import type { TableHandler } from "./define-table";
-import type { TableClient } from "../runtime/table-client";
-import type { AnyParamRef, ResolveParams } from "./param";
+import type { TableClient } from "~/runtime/table-client";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTableHandler = TableHandler<any, any, any, any, any, any>;
@@ -42,9 +41,7 @@ export type FifoQueueMessage<T = unknown> = {
 /**
  * Configuration options for a FIFO queue handler
  */
-export type FifoQueueConfig = {
-  /** Handler name. Defaults to export name if not specified */
-  name?: string;
+export type FifoQueueConfig = LambdaWithPermissions & {
   /** Number of messages per Lambda invocation (1-10 for FIFO, default: 10) */
   batchSize?: number;
   /** Maximum time in seconds to gather messages before invoking (0-300, default: 0) */
@@ -55,14 +52,6 @@ export type FifoQueueConfig = {
   retentionPeriod?: number;
   /** Enable content-based deduplication (default: true) */
   contentBasedDeduplication?: boolean;
-  /** Lambda memory in MB (default: 256) */
-  memory?: number;
-  /** Lambda timeout in seconds (default: 30) */
-  timeout?: number;
-  /** Additional IAM permissions for the Lambda */
-  permissions?: Permission[];
-  /** Enable observability logging to platform table (default: true) */
-  observe?: boolean;
 };
 
 /**

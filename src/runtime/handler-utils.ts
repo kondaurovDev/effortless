@@ -1,14 +1,22 @@
-import { randomUUID } from "crypto";
 import { readFileSync } from "fs";
 import { join } from "path";
-import type { AnyParamRef } from "~/handlers/param";
+import type { AnyParamRef, LogLevel } from "~/deploy/shared";
 import { createTableClient } from "./table-client";
 import { getParameters } from "./ssm-client";
-import { createPlatformClient } from "./platform-client";
-import { truncateForStorage } from "./platform-types";
+
+export type { LogLevel };
 
 export const ENV_TABLE_PREFIX = "EFF_TABLE_";
 export const ENV_PARAM_PREFIX = "EFF_PARAM_";
+
+const LOG_RANK: Record<LogLevel, number> = { error: 0, info: 1, debug: 2 };
+
+const truncate = (value: unknown, maxLength = 4096): unknown => {
+  if (value === undefined || value === null) return value;
+  const str = typeof value === "string" ? value : JSON.stringify(value);
+  if (str.length <= maxLength) return value;
+  return str.slice(0, maxLength) + "...[truncated]";
+};
 
 /**
  * Build resolved deps object from handler.deps and EFF_TABLE_* env vars.
@@ -66,6 +74,8 @@ export type HandlerRuntime = {
   commonArgs(): Promise<Record<string, unknown>>;
   logExecution(startTime: number, input: unknown, output: unknown): void;
   logError(startTime: number, input: unknown, error: unknown): void;
+  patchConsole(): void;
+  restoreConsole(): void;
   handlerName: string;
 };
 
@@ -78,10 +88,11 @@ export const readStatic = (filePath: string): string =>
 
 export const createHandlerRuntime = (
   handler: { context?: (...args: any[]) => any; deps?: any; params?: any; static?: string[] },
-  handlerType: "http" | "table" | "app" | "fifo-queue"
+  handlerType: "http" | "table" | "app" | "fifo-queue",
+  logLevel: LogLevel = "info"
 ): HandlerRuntime => {
-  const platform = createPlatformClient();
   const handlerName = process.env.EFF_HANDLER ?? "unknown";
+  const rank = LOG_RANK[logLevel];
 
   let ctx: unknown = null;
   let resolvedDeps: Record<string, unknown> | undefined;
@@ -118,18 +129,42 @@ export const createHandlerRuntime = (
   };
 
   const logExecution = (startTime: number, input: unknown, output: unknown) => {
-    platform?.appendExecution(handlerName, handlerType, {
-      id: randomUUID(), ts: new Date().toISOString(), ms: Date.now() - startTime,
-      in: input, out: truncateForStorage(output),
-    });
+    if (rank < LOG_RANK.info) return;
+    const entry: Record<string, unknown> = {
+      level: "info", handler: handlerName, type: handlerType, ms: Date.now() - startTime,
+    };
+    if (rank >= LOG_RANK.debug) {
+      entry.input = truncate(input);
+      entry.output = truncate(output);
+    }
+    console.log(JSON.stringify(entry));
   };
 
   const logError = (startTime: number, input: unknown, error: unknown) => {
-    platform?.appendError(handlerName, handlerType, {
-      id: randomUUID(), ts: new Date().toISOString(), ms: Date.now() - startTime,
-      in: input, err: error instanceof Error ? error.message : String(error),
-    });
+    const entry: Record<string, unknown> = {
+      level: "error", handler: handlerName, type: handlerType, ms: Date.now() - startTime,
+      error: error instanceof Error ? error.message : String(error),
+    };
+    if (rank >= LOG_RANK.debug) {
+      entry.input = truncate(input);
+    }
+    console.error(JSON.stringify(entry));
   };
 
-  return { commonArgs, logExecution, logError, handlerName };
+  // Console interception: suppress developer logs below configured logLevel
+  const noop = () => {};
+  const saved = { log: console.log, info: console.info, debug: console.debug, warn: console.warn, error: console.error };
+
+  const patchConsole = () => {
+    if (rank < LOG_RANK.debug) console.debug = noop;
+    if (rank < LOG_RANK.info) { console.log = noop; console.info = noop; }
+  };
+
+  const restoreConsole = () => {
+    console.log = saved.log;
+    console.info = saved.info;
+    console.debug = saved.debug;
+  };
+
+  return { commonArgs, logExecution, logError, patchConsole, restoreConsole, handlerName };
 };

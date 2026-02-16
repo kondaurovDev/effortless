@@ -8,8 +8,8 @@ export { defineTable } from "./handlers/define-table"
 export { defineApp } from "./handlers/define-app"
 export { defineStaticSite } from "./handlers/define-static-site"
 export { defineFifoQueue } from "./handlers/define-fifo-queue"
-export { param } from "./handlers/param"
-export { typed } from "./handlers/typed"
+export { param } from "./deploy/shared"
+export { typed } from "./deploy/shared"
 
 // Types
 export type { HttpConfig, HttpRequest, HttpResponse, HttpMethod, ContentType, HttpHandler, HttpHandlerFn, DefineHttpOptions, ResolveDeps } from "./handlers/define-http"
@@ -18,9 +18,7 @@ export type { AppConfig, AppHandler } from "./handlers/define-app"
 export type { StaticSiteConfig, StaticSiteHandler } from "./handlers/define-static-site"
 export type { FifoQueueConfig, FifoQueueMessage, FifoQueueHandler, FifoQueueMessageFn, FifoQueueBatchFn, DefineFifoQueueOptions } from "./handlers/define-fifo-queue"
 export type { TableClient, QueryParams } from "./runtime/table-client"
-export type { ParamRef, ResolveParams } from "./handlers/param"
+export type { ParamRef, ResolveParams } from "./deploy/shared"
 
-// Platform
-export { createPlatformClient } from "./runtime/platform-client"
-export type { PlatformClient } from "./runtime/platform-client"
-export type { PlatformEntity, ExecutionLogEntity, ExecutionEntry, ErrorEntry, BasePlatformEntity } from "./runtime/platform-types"
+// Shared types
+export type { LambdaConfig, LambdaWithPermissions, LogLevel } from "./deploy/shared"

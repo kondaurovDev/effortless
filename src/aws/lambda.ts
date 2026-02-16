@@ -1,9 +1,16 @@
 import { Effect, Schedule } from "effect";
-import { Runtime } from "@aws-sdk/client-lambda";
+import { Architecture, Runtime } from "@aws-sdk/client-lambda";
 import * as crypto from "crypto";
 import { lambda } from "./clients";
 const computeCodeHash = (code: Uint8Array): string =>
   crypto.createHash("sha256").update(code).digest("base64");
+
+export type LambdaStatus = "created" | "updated" | "unchanged";
+
+export type LambdaResult = {
+  functionArn: string;
+  status: LambdaStatus;
+};
 
 export type LambdaConfig = {
   project: string;
@@ -12,14 +19,23 @@ export type LambdaConfig = {
   region: string;
   roleArn: string;
   code: Uint8Array;
+  /** Memory in MB. @default 256 */
   memory: number;
+  /** Timeout in seconds. @default 30 */
   timeout: number;
+  /** @default "index.handler" */
   handler?: string;
+  /** @default Runtime.nodejs24x */
   runtime?: Runtime;
   tags?: Record<string, string>;
   layers?: string[];
   environment?: Record<string, string>;
 };
+
+/**
+ * All Lambdas are deployed with ARM64 (Graviton2) architecture.
+ * ~20% cheaper than x86_64 with better price-performance.
+ */
 
 const arraysEqual = (a: string[], b: string[]): boolean => {
   if (a.length !== b.length) return false;
@@ -36,7 +52,7 @@ export const ensureLambda = (
     const memory = config.memory;
     const timeout = config.timeout;
     const handler = config.handler ?? "index.handler";
-    const runtime = config.runtime ?? Runtime.nodejs22x;
+    const runtime = config.runtime ?? Runtime.nodejs24x;
     const layers = config.layers ?? [];
     const environment = config.environment ?? {};
 
@@ -62,6 +78,9 @@ export const ensureLambda = (
       const envKeys = [...new Set([...Object.keys(existingEnv), ...Object.keys(environment)])].sort();
       const envChanged = envKeys.some(k => existingEnv[k] !== environment[k]);
 
+      const existingArch = existingFunction.Architectures?.[0] ?? Architecture.x86_64;
+      const archChanged = existingArch !== Architecture.arm64;
+
       const configChanged =
         existingFunction.MemorySize !== memory ||
         existingFunction.Timeout !== timeout ||
@@ -70,26 +89,27 @@ export const ensureLambda = (
         layersChanged ||
         envChanged;
 
-      if (!codeChanged && !configChanged) {
-        yield* Effect.logInfo(`Function ${functionName} unchanged, skipping update`);
-        return existingFunction.FunctionArn!;
+      if (!codeChanged && !archChanged && !configChanged) {
+        yield* Effect.logDebug(`Function ${functionName} unchanged, skipping update`);
+        return { functionArn: existingFunction.FunctionArn!, status: "unchanged" as const };
       }
 
-      if (codeChanged) {
-        yield* Effect.logInfo(`Updating function code: ${functionName}`);
+      if (codeChanged || archChanged) {
+        yield* Effect.logDebug(`Updating function code: ${functionName}`);
 
         yield* lambda.make("update_function_code", {
           FunctionName: functionName,
-          ZipFile: config.code
+          ZipFile: config.code,
+          Architectures: [Architecture.arm64]
         });
 
         yield* waitForFunctionActive(functionName);
       } else {
-        yield* Effect.logInfo(`Code unchanged: ${functionName}`);
+        yield* Effect.logDebug(`Code unchanged: ${functionName}`);
       }
 
       if (configChanged) {
-        yield* Effect.logInfo(`Updating function config: ${functionName}`);
+        yield* Effect.logDebug(`Updating function config: ${functionName}`);
 
         const updateConfig = lambda.make("update_function_configuration", {
           FunctionName: functionName,
@@ -119,10 +139,10 @@ export const ensureLambda = (
         });
       }
 
-      return existingFunction.FunctionArn!;
+      return { functionArn: existingFunction.FunctionArn!, status: "updated" as const };
     }
 
-    yield* Effect.logInfo(`Creating function: ${functionName}`);
+    yield* Effect.logDebug(`Creating function: ${functionName}`);
 
     const createResult = yield* lambda.make("create_function", {
       FunctionName: functionName,
@@ -132,6 +152,7 @@ export const ensureLambda = (
       },
       Handler: handler,
       Runtime: runtime,
+      Architectures: [Architecture.arm64],
       MemorySize: memory,
       Timeout: timeout,
       Tags: config.tags,
@@ -141,7 +162,7 @@ export const ensureLambda = (
 
     yield* waitForFunctionActive(functionName);
 
-    return createResult.FunctionArn!;
+    return { functionArn: createResult.FunctionArn!, status: "created" as const };
   });
 
 const waitForFunctionActive = (functionName: string) =>
@@ -160,7 +181,7 @@ const waitForFunctionActive = (functionName: string) =>
         })
       ),
       {
-        times: 30,
+        times: 15,
         schedule: Schedule.spaced("2 seconds")
       }
     );
@@ -170,7 +191,7 @@ const waitForFunctionActive = (functionName: string) =>
 
 export const deleteLambda = (functionName: string) =>
   Effect.gen(function* () {
-    yield* Effect.logInfo(`Deleting Lambda function: ${functionName}`);
+    yield* Effect.logDebug(`Deleting Lambda function: ${functionName}`);
 
     yield* lambda.make("delete_function", {
       FunctionName: functionName

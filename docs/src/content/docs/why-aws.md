@@ -80,7 +80,7 @@ Beyond creating AWS resources, Effortless auto-wires all the connective tissue t
 - **DynamoDB access** — table handlers get full access to their own table; `deps: { orders }` grants access to dependent tables
 - **SSM access** — `params: { key: param("...") }` grants `ssm:GetParameter` and `ssm:GetParameters`
 - **SQS access** — queue handlers get permissions to receive and delete messages
-- **Platform table** — observability logging permissions when `observe` is enabled (default)
+- **Structured logging** — configurable log levels with automatic console interception
 - **API Gateway → Lambda** — resource-based policy allowing API Gateway to invoke your function
 - **Event source mappings** — DynamoDB Streams → Lambda and SQS → Lambda wiring with partial batch failure reporting
 

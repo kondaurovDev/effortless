@@ -1,9 +1,9 @@
+import type { LambdaConfig } from "../deploy/shared";
+
 /**
  * Configuration for a Lambda-served static site (API Gateway + Lambda)
  */
-export type AppConfig = {
-  /** Handler name. Defaults to export name if not specified */
-  name?: string;
+export type AppConfig = LambdaConfig & {
   /** Base URL path the site is served under (e.g., "/app") */
   path?: string;
   /** Directory containing the static site files, relative to project root */
@@ -14,12 +14,6 @@ export type AppConfig = {
   spa?: boolean;
   /** Shell command to run before deploy to generate site content (e.g., "npx astro build") */
   build?: string;
-  /** Lambda memory in MB (default: 256) */
-  memory?: number;
-  /** Lambda timeout in seconds (default: 5) */
-  timeout?: number;
-  /** Enable observability logging to platform table (default: false) */
-  observe?: boolean;
 };
 
 /**

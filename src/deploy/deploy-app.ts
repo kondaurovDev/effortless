@@ -25,7 +25,7 @@ export const deployAppLambda = ({ input, fn, layerArn, external, depsEnv, depsPe
 
     // Run build command if specified
     if (config.build) {
-      yield* Effect.logInfo(`Building site: ${config.build}`);
+      yield* Effect.logDebug(`Building site: ${config.build}`);
       yield* Effect.try({
         try: () => execSync(config.build!, { cwd: input.projectDir, stdio: "inherit" }),
         catch: (error) => new Error(`Site build failed: ${error}`),
@@ -35,7 +35,7 @@ export const deployAppLambda = ({ input, fn, layerArn, external, depsEnv, depsPe
     // Auto-generate static file globs from the dir property
     const staticGlobs = [`${config.dir}/**/*`];
 
-    const { functionArn } = yield* deployCoreLambda({
+    const { functionArn, status } = yield* deployCoreLambda({
       input,
       exportName,
       handlerName,
@@ -49,5 +49,5 @@ export const deployAppLambda = ({ input, fn, layerArn, external, depsEnv, depsPe
       staticGlobs,
     });
 
-    return { exportName, functionArn, config, handlerName };
+    return { exportName, functionArn, status, config, handlerName };
   });

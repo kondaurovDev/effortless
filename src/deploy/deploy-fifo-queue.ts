@@ -15,6 +15,7 @@ import {
 export type DeployFifoQueueResult = {
   exportName: string;
   functionArn: string;
+  status: import("~/aws/lambda").LambdaStatus;
   queueUrl: string;
   queueArn: string;
 };
@@ -44,7 +45,7 @@ export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv
     };
 
     // Create SQS FIFO queue
-    yield* Effect.logInfo("Creating SQS FIFO queue...");
+    yield* Effect.logDebug("Creating SQS FIFO queue...");
     const queueName = `${input.project}-${tagCtx.stage}-${handlerName}`;
     const timeout = config.timeout ?? 30;
     const { queueUrl, queueArn } = yield* ensureFifoQueue({
@@ -63,7 +64,7 @@ export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv
     };
 
     // Deploy Lambda
-    const { functionArn } = yield* deployCoreLambda({
+    const { functionArn, status } = yield* deployCoreLambda({
       input,
       exportName,
       handlerName,
@@ -80,7 +81,7 @@ export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv
     });
 
     // Setup event source mapping (SQS -> Lambda)
-    yield* Effect.logInfo("Setting up SQS event source mapping...");
+    yield* Effect.logDebug("Setting up SQS event source mapping...");
     yield* ensureSqsEventSourceMapping({
       functionArn,
       queueArn,
@@ -88,12 +89,13 @@ export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv
       batchWindow: config.batchWindow,
     });
 
-    yield* Effect.logInfo(`FIFO queue deployment complete! Queue: ${queueUrl}`);
+    yield* Effect.logDebug(`FIFO queue deployment complete! Queue: ${queueUrl}`);
 
     return {
       exportName,
       functionArn,
+      status,
       queueUrl,
       queueArn,
-    } satisfies DeployFifoQueueResult;
+    };
   });

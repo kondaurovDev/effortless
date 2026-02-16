@@ -59,49 +59,55 @@ type LambdaEvent = {
 
 export const wrapApp = (handler: AppHandler) => {
   const { dir, index: indexFile = "index.html", spa = false } = handler.config;
-  const rt = createHandlerRuntime({}, "app");
+  const rt = createHandlerRuntime({}, "app", handler.config.logLevel ?? "error");
   const baseDir = join(process.cwd(), dir);
 
   return async (event: LambdaEvent) => {
     const startTime = Date.now();
-    let filePath = event.pathParameters?.["file"] ?? "";
+    rt.patchConsole();
 
-    // Empty path or trailing slash → serve index
-    if (!filePath || filePath.endsWith("/")) {
-      filePath = filePath + indexFile;
-    }
+    try {
+      let filePath = event.pathParameters?.["file"] ?? "";
 
-    const fullPath = resolve(baseDir, filePath);
-
-    // Path traversal protection
-    if (!fullPath.startsWith(baseDir)) {
-      return {
-        statusCode: 403,
-        headers: { "Content-Type": "text/html; charset=utf-8" },
-        body: "<!DOCTYPE html><html><body><h1>403 Forbidden</h1></body></html>",
-      };
-    }
-
-    // Serve file if it exists
-    if (existsSync(fullPath)) {
-      return serveFile(fullPath, filePath, rt, startTime);
-    }
-
-    // SPA mode: if path has no extension, serve index.html
-    if (spa && !extname(filePath)) {
-      const spaPath = join(baseDir, indexFile);
-      if (existsSync(spaPath)) {
-        return serveFile(spaPath, indexFile, rt, startTime);
+      // Empty path or trailing slash → serve index
+      if (!filePath || filePath.endsWith("/")) {
+        filePath = filePath + indexFile;
       }
-    }
 
-    // 404
-    rt.logError(startTime, { path: filePath }, "File not found");
-    return {
-      statusCode: 404,
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-      body: `<!DOCTYPE html><html><body><h1>404 Not Found</h1><p>${filePath}</p></body></html>`,
-    };
+      const fullPath = resolve(baseDir, filePath);
+
+      // Path traversal protection
+      if (!fullPath.startsWith(baseDir)) {
+        return {
+          statusCode: 403,
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+          body: "<!DOCTYPE html><html><body><h1>403 Forbidden</h1></body></html>",
+        };
+      }
+
+      // Serve file if it exists
+      if (existsSync(fullPath)) {
+        return serveFile(fullPath, filePath, rt, startTime);
+      }
+
+      // SPA mode: if path has no extension, serve index.html
+      if (spa && !extname(filePath)) {
+        const spaPath = join(baseDir, indexFile);
+        if (existsSync(spaPath)) {
+          return serveFile(spaPath, indexFile, rt, startTime);
+        }
+      }
+
+      // 404
+      rt.logError(startTime, { path: filePath }, "File not found");
+      return {
+        statusCode: 404,
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+        body: `<!DOCTYPE html><html><body><h1>404 Not Found</h1><p>${filePath}</p></body></html>`,
+      };
+    } finally {
+      rt.restoreConsole();
+    }
   };
 };
 

@@ -1,7 +1,6 @@
-import type { Permission } from "./permissions";
+import type { LambdaWithPermissions, AnyParamRef, ResolveParams } from "../deploy/shared";
 import type { TableHandler } from "./define-table";
 import type { TableClient } from "../runtime/table-client";
-import type { AnyParamRef, ResolveParams } from "./param";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTableHandler = TableHandler<any, any, any, any, any, any>;
@@ -64,21 +63,11 @@ export type HttpResponse = {
 /**
  * Configuration options extracted from DefineHttpOptions (without onRequest callback)
  */
-export type HttpConfig = {
-  /** Handler name. Defaults to export name if not specified */
-  name?: string;
+export type HttpConfig = LambdaWithPermissions & {
   /** HTTP method for the route */
   method: HttpMethod;
   /** Route path (e.g., "/api/users", "/api/users/{id}") */
   path: string;
-  /** Lambda memory in MB (default: 256) */
-  memory?: number;
-  /** Lambda timeout in seconds (default: 30) */
-  timeout?: number;
-  /** Additional IAM permissions for the Lambda */
-  permissions?: Permission[];
-  /** Enable observability logging to platform table (default: true) */
-  observe?: boolean;
 };
 
 /**

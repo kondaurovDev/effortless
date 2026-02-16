@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Runtime } from "@aws-sdk/client-lambda";
+import { Architecture, Runtime } from "@aws-sdk/client-lambda";
 import * as crypto from "crypto";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
@@ -18,11 +18,14 @@ export type LayerConfig = {
   tags?: Record<string, string>;
 };
 
+export type LayerStatus = "created" | "cached";
+
 export type LayerResult = {
   layerArn: string;
   layerVersionArn: string;
   version: number;
   lockfileHash: string;
+  status: LayerStatus;
 };
 
 /**
@@ -110,21 +113,32 @@ const getPackageRealPath = (projectDir: string, pkgName: string): string | null 
 };
 
 
+type PackageDeps = {
+  required: string[];
+  optional: string[];
+  all: string[];
+};
+
+const EMPTY_DEPS: PackageDeps = { required: [], optional: [], all: [] };
+
 /**
- * Get all dependencies from a package's package.json (regular + optional + peer)
+ * Get all dependencies from a package's package.json, categorized by type.
+ * `required` = dependencies, `optional` = optionalDependencies + peerDependencies.
  */
-const getPackageDeps = (pkgPath: string): string[] => {
+const getPackageDeps = (pkgPath: string): PackageDeps => {
   const pkgJsonPath = path.join(pkgPath, "package.json");
-  if (!fsSync.existsSync(pkgJsonPath)) return [];
+  if (!fsSync.existsSync(pkgJsonPath)) return EMPTY_DEPS;
 
   try {
     const pkgJson = JSON.parse(fsSync.readFileSync(pkgJsonPath, "utf-8"));
-    const deps = Object.keys(pkgJson.dependencies ?? {});
+    const required = Object.keys(pkgJson.dependencies ?? {});
     const optionalDeps = Object.keys(pkgJson.optionalDependencies ?? {});
     const peerDeps = Object.keys(pkgJson.peerDependencies ?? {});
-    return [...new Set([...deps, ...optionalDeps, ...peerDeps])];
+    const optional = [...new Set([...optionalDeps, ...peerDeps])];
+    const all = [...new Set([...required, ...optional])];
+    return { required, optional, all };
   } catch {
-    return [];
+    return EMPTY_DEPS;
   }
 };
 
@@ -182,7 +196,9 @@ const collectTransitiveDeps = (
   searchPath: string = path.join(projectDir, "node_modules"),
   visited = new Set<string>(),
   resolvedPaths = new Map<string, string>(),
-  warnings: string[] = []
+  warnings: string[] = [],
+  /** Names of deps that are optional/peer — missing ones are silently skipped */
+  optionalNames = new Set<string>()
 ): CollectResult => {
   const rootNodeModules = path.join(projectDir, "node_modules");
 
@@ -219,7 +235,10 @@ const collectTransitiveDeps = (
     }
 
     if (!realPath) {
-      warnings.push(`Package "${dep}" not found (searched: ${searchPath}, root node_modules, pnpm store) — entire subtree skipped`);
+      // Only warn for required deps; optional/peer deps that aren't installed are expected
+      if (!optionalNames.has(dep)) {
+        warnings.push(`Package "${dep}" not found (searched: ${searchPath}, root node_modules, pnpm store) — entire subtree skipped`);
+      }
       continue;
     }
 
@@ -228,7 +247,7 @@ const collectTransitiveDeps = (
 
     // Get this package's dependencies
     const pkgDeps = getPackageDeps(realPath);
-    if (pkgDeps.length > 0) {
+    if (pkgDeps.all.length > 0) {
       // For pnpm, nested deps live in the same node_modules as the package itself
       // e.g., .pnpm/@aws-sdk+client-dynamodb@3.x.x/node_modules/@aws-sdk/client-dynamodb
       //       -> nested deps at .pnpm/@aws-sdk+client-dynamodb@3.x.x/node_modules/
@@ -237,7 +256,10 @@ const collectTransitiveDeps = (
         ? path.dirname(path.dirname(realPath))
         : path.dirname(realPath);
 
-      collectTransitiveDeps(projectDir, pkgDeps, pkgNodeModules, visited, resolvedPaths, warnings);
+      const nextOptional = new Set(optionalNames);
+      for (const name of pkgDeps.optional) nextOptional.add(name);
+
+      collectTransitiveDeps(projectDir, pkgDeps.all, pkgNodeModules, visited, resolvedPaths, warnings, nextOptional);
     }
   }
 
@@ -286,12 +308,10 @@ export const collectLayerPackages = (projectDir: string, dependencies: string[])
 
       for (const pkgPath of pkgPaths) {
         const pkgDeps = getPackageDeps(pkgPath);
-        for (const dep of pkgDeps) {
+        const optionalSet = new Set(pkgDeps.optional);
+        for (const dep of pkgDeps.all) {
           if (!packages.has(dep) && !isAwsRuntime(dep)) {
-            packages.add(dep);
-            changed = true;
-
-            // Resolve the auto-added dep's path
+            // Resolve the dep's path
             let depPath = findPackagePath(projectDir, dep);
             // Fallback: look in parent package's node_modules (pnpm nested structure)
             if (!depPath) {
@@ -306,6 +326,12 @@ export const collectLayerPackages = (projectDir: string, dependencies: string[])
                 } catch {}
               }
             }
+
+            // Skip optional/peer deps that aren't installed
+            if (!depPath && optionalSet.has(dep)) continue;
+
+            packages.add(dep);
+            changed = true;
             if (depPath) resolvedPaths.set(dep, depPath);
           }
         }
@@ -395,7 +421,8 @@ export const getExistingLayerByHash = (layerName: string, expectedHash: string) 
       layerArn: matchingVersion.LayerVersionArn!,
       layerVersionArn: matchingVersion.LayerVersionArn!,
       version: matchingVersion.Version!,
-      lockfileHash: expectedHash
+      lockfileHash: expectedHash,
+      status: "cached"
     } satisfies LayerResult;
   });
 
@@ -410,7 +437,7 @@ export const ensureLayer = (config: LayerConfig) =>
     );
 
     if (dependencies.length === 0) {
-      yield* Effect.logInfo("No production dependencies, skipping layer creation");
+      yield* Effect.logDebug("No production dependencies, skipping layer creation");
       return null;
     }
 
@@ -432,7 +459,7 @@ export const ensureLayer = (config: LayerConfig) =>
     // Check for existing layer with same hash
     const existing = yield* getExistingLayerByHash(layerName, hash);
     if (existing) {
-      yield* Effect.logInfo(`Layer ${layerName} with hash ${hash} already exists (version ${existing.version})`);
+      yield* Effect.logDebug(`Layer ${layerName} with hash ${hash} already exists (version ${existing.version})`);
       return existing;
     }
 
@@ -444,7 +471,7 @@ export const ensureLayer = (config: LayerConfig) =>
       yield* Effect.logWarning(`[layer] ${warning}`);
     }
 
-    yield* Effect.logInfo(`Creating layer ${layerName} with ${allPackages.length} packages (hash: ${hash})`);
+    yield* Effect.logDebug(`Creating layer ${layerName} with ${allPackages.length} packages (hash: ${hash})`);
     yield* Effect.logDebug(`Layer packages: ${allPackages.join(", ")}`);
 
     // Create layer zip
@@ -453,23 +480,25 @@ export const ensureLayer = (config: LayerConfig) =>
     if (skippedPackages.length > 0) {
       yield* Effect.logWarning(`Skipped ${skippedPackages.length} packages (not found): ${skippedPackages.slice(0, 10).join(", ")}${skippedPackages.length > 10 ? "..." : ""}`);
     }
-    yield* Effect.logInfo(`Layer zip size: ${(layerZip.length / 1024 / 1024).toFixed(2)} MB (${includedPackages.length} packages)`);
+    yield* Effect.logDebug(`Layer zip size: ${(layerZip.length / 1024 / 1024).toFixed(2)} MB (${includedPackages.length} packages)`);
 
     // Publish layer
     const result = yield* lambda.make("publish_layer_version", {
       LayerName: layerName,
       Description: `effortless deps layer hash:${hash}`,
       Content: { ZipFile: layerZip },
-      CompatibleRuntimes: [Runtime.nodejs22x]
+      CompatibleRuntimes: [Runtime.nodejs24x],
+      CompatibleArchitectures: [Architecture.arm64]
     });
 
-    yield* Effect.logInfo(`Published layer version ${result.Version}`);
+    yield* Effect.logDebug(`Published layer version ${result.Version}`);
 
     return {
       layerArn: result.LayerVersionArn!,
       layerVersionArn: result.LayerVersionArn!,
       version: result.Version!,
-      lockfileHash: hash
+      lockfileHash: hash,
+      status: "created"
     } satisfies LayerResult;
   });
 
@@ -478,7 +507,7 @@ export const ensureLayer = (config: LayerConfig) =>
  */
 export const deleteLayerVersion = (layerName: string, versionNumber: number) =>
   Effect.gen(function* () {
-    yield* Effect.logInfo(`Deleting layer ${layerName} version ${versionNumber}`);
+    yield* Effect.logDebug(`Deleting layer ${layerName} version ${versionNumber}`);
 
     yield* lambda.make("delete_layer_version", {
       LayerName: layerName,
@@ -525,7 +554,7 @@ export const deleteAllLayerVersions = (layerName: string) =>
     const versions = yield* listLayerVersions(layerName);
 
     if (versions.length === 0) {
-      yield* Effect.logInfo(`No versions found for layer ${layerName}`);
+      yield* Effect.logDebug(`No versions found for layer ${layerName}`);
       return 0;
     }
 

@@ -1,7 +1,7 @@
 import { describe, it, expectTypeOf } from "vitest";
 import { defineHttp } from "~/handlers/define-http";
 import { defineTable } from "~/handlers/define-table";
-import { param } from "~/handlers/param";
+import { param } from "~/deploy/shared";
 import type { HttpRequest } from "~/handlers/define-http";
 import type { TableRecord } from "~/handlers/define-table";
 import type { TableClient } from "~/runtime/table-client";

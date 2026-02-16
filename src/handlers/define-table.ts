@@ -1,6 +1,5 @@
-import type { Permission } from "./permissions";
+import type { LambdaWithPermissions, AnyParamRef, ResolveParams } from "../deploy/shared";
 import type { TableClient } from "../runtime/table-client";
-import type { AnyParamRef, ResolveParams } from "./param";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTableHandler = TableHandler<any, any, any, any, any, any>;
@@ -29,9 +28,7 @@ export type StreamView = "NEW_AND_OLD_IMAGES" | "NEW_IMAGE" | "OLD_IMAGE" | "KEY
 /**
  * Configuration options extracted from DefineTableOptions (without onRecord/context)
  */
-export type TableConfig = {
-  /** Table/handler name. Defaults to export name if not specified */
-  name?: string;
+export type TableConfig = LambdaWithPermissions & {
   /** Partition key definition */
   pk: TableKey;
   /** Sort key definition (optional) */
@@ -48,14 +45,6 @@ export type TableConfig = {
   batchWindow?: number;
   /** Where to start reading the stream (default: "LATEST") */
   startingPosition?: "LATEST" | "TRIM_HORIZON";
-  /** Lambda memory in MB (default: 256) */
-  memory?: number;
-  /** Lambda timeout in seconds (default: 30) */
-  timeout?: number;
-  /** Additional IAM permissions for the Lambda */
-  permissions?: Permission[];
-  /** Enable observability logging to platform table (default: true) */
-  observe?: boolean;
 };
 
 /**

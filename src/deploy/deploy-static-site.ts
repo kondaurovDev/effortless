@@ -45,7 +45,7 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
 
     // 1. Run build command if specified
     if (config.build) {
-      yield* Effect.logInfo(`Building site: ${config.build}`);
+      yield* Effect.logDebug(`Building site: ${config.build}`);
       yield* Effect.try({
         try: () => execSync(config.build!, { cwd: projectDir, stdio: "inherit" }),
         catch: (error) => new Error(`Site build failed: ${error}`),
@@ -99,7 +99,7 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     yield* invalidateDistribution(distributionId);
 
     const url = `https://${domainName}`;
-    yield* Effect.logInfo(`Static site deployed: ${url}`);
+    yield* Effect.logDebug(`Static site deployed: ${url}`);
 
     return {
       exportName,

@@ -1,10 +1,10 @@
-import { Effect } from "effect";
-import * as path from "path";
+import { Effect, Console } from "effect";
+import { c } from "~/cli/colors";
 import {
   Aws,
   ensureProjectApi,
   addRouteToApi,
-  ensureTable,
+  removeStaleRoutes,
   makeTags,
   resolveStage,
   type TagContext,
@@ -36,6 +36,80 @@ import { deployTableFunction } from "./deploy-table";
 import { deployAppLambda } from "./deploy-app";
 import { deployStaticSite, type DeployStaticSiteResult } from "./deploy-static-site";
 import { deployFifoQueueFunction, type DeployFifoQueueResult } from "./deploy-fifo-queue";
+
+// ============ Progress tracking ============
+
+type StepStatus = "created" | "updated" | "unchanged";
+
+const statusLabel = (status: StepStatus) => {
+  switch (status) {
+    case "created": return c.green("created");
+    case "updated": return c.yellow("updated");
+    case "unchanged": return c.dim("unchanged");
+  }
+};
+
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+type HandlerManifest = { name: string; type: string }[];
+
+/**
+ * Create a live progress tracker.
+ * TTY mode: pre-prints all handler lines with a spinner, then updates them in place via ANSI escape codes.
+ * Non-TTY mode (CI): prints each line sequentially as handlers complete.
+ */
+const createLiveProgress = (manifest: HandlerManifest) => {
+  const isTTY = process.stdout.isTTY ?? false;
+  const lineIndex = new Map<string, number>();
+  manifest.forEach((h, i) => lineIndex.set(`${h.name}:${h.type}`, i));
+
+  const results = new Map<string, StepStatus>();
+  const startTime = Date.now();
+  let frame = 0;
+  let timer: ReturnType<typeof setInterval> | undefined;
+
+  if (isTTY) {
+    for (const h of manifest) {
+      process.stdout.write(`  ${c.dim(`${h.name} (${h.type})`)} ${c.cyan(SPINNER[0]!)}\n`);
+    }
+    timer = setInterval(() => {
+      frame = (frame + 1) % SPINNER.length;
+      for (const h of manifest) {
+        const key = `${h.name}:${h.type}`;
+        if (results.has(key)) continue;
+        const idx = lineIndex.get(key)!;
+        const up = manifest.length - idx;
+        const line = `  ${c.dim(`${h.name} (${h.type})`)} ${c.cyan(SPINNER[frame]!)}`;
+        process.stdout.write(`\x1b[${up}A\x1b[2K${line}\x1b[${up}B\x1b[G`);
+      }
+    }, 80);
+  }
+
+  const formatDuration = () => {
+    const sec = ((Date.now() - startTime) / 1000).toFixed(1);
+    return c.dim(`${sec}s`);
+  };
+
+  return (name: string, type: string, status: StepStatus): Effect.Effect<void> =>
+    Effect.sync(() => {
+      const key = `${name}:${type}`;
+      results.set(key, status);
+      const line = `  ${name} ${c.dim(`(${type})`)} ${statusLabel(status)} ${formatDuration()}`;
+
+      if (isTTY) {
+        const idx = lineIndex.get(key) ?? 0;
+        const up = manifest.length - idx;
+        process.stdout.write(`\x1b[${up}A\x1b[2K${line}\x1b[${up}B\x1b[G`);
+        if (results.size === manifest.length && timer) {
+          clearInterval(timer);
+        }
+      } else {
+        process.stdout.write(`  ${c.dim(`[${results.size}/${manifest.length}]`)} ${name} ${c.dim(`(${type})`)} ${statusLabel(status)} ${formatDuration()}\n`);
+      }
+    });
+};
+
+const DEPLOY_CONCURRENCY = 5;
 
 // ============ Layer preparation ============
 
@@ -74,11 +148,13 @@ const prepareLayer = (input: PrepareLayerInput) =>
 
     yield* Effect.logDebug(`Layer result: ${layerResult ? "exists" : "null"}, external packages: ${external.length}`);
     if (external.length > 0) {
-      yield* Effect.logInfo(`Bundling with ${external.length} external packages from layer`);
+      yield* Effect.logDebug(`Bundling with ${external.length} external packages from layer`);
     }
 
     return {
       layerArn: layerResult?.layerVersionArn,
+      layerVersion: layerResult?.version,
+      layerStatus: layerResult?.status,
       external
     };
   });
@@ -180,181 +256,101 @@ const mergeResolved = (
   return { depsEnv: env, depsPermissions: permissions };
 };
 
-// ============ Platform table ============
+// ============ Parallel deploy task builders ============
 
-const PLATFORM_PERMISSIONS = [
-  "dynamodb:PutItem",
-  "dynamodb:GetItem",
-  "dynamodb:UpdateItem",
-  "dynamodb:Query",
-] as const;
-
-const ensurePlatformTable = (project: string, stage: string, region: string) =>
-  Effect.gen(function* () {
-    const tableName = `${project}-${stage}-platform`;
-    const tagCtx: TagContext = { project, stage, handler: "platform" };
-
-    yield* Effect.logInfo(`Ensuring platform table: ${tableName}`);
-
-    yield* ensureTable({
-      name: tableName,
-      pk: { name: "pk", type: "string" },
-      sk: { name: "sk", type: "string" },
-      billingMode: "PAY_PER_REQUEST",
-      streamView: "NEW_AND_OLD_IMAGES",
-      tags: makeTags(tagCtx, "dynamodb"),
-      ttlAttribute: "ttl",
-    }).pipe(
-      Effect.provide(
-        Aws.makeClients({ dynamodb: { region } })
-      )
-    );
-
-    return tableName;
-  });
-
-// ============ HTTP handlers deployment ============
-
-type DeployHttpHandlersInput = {
-  handlers: DiscoveredHandlers["httpHandlers"];
-  apiId: string;
+type DeployTaskCtx = {
   input: DeployProjectInput;
   layerArn: string | undefined;
   external: string[];
+  stage: string;
   tableNameMap: Map<string, string>;
-  platformEnv: Record<string, string>;
-  platformPermissions: readonly string[];
+  logComplete: (name: string, type: string, status: StepStatus) => Effect.Effect<void>;
 };
 
-const deployHttpHandlers = (ctx: DeployHttpHandlersInput) =>
-  Effect.gen(function* () {
-    const results: DeployResult[] = [];
+const makeDeployInput = (ctx: DeployTaskCtx, file: string): DeployInput => ({
+  projectDir: ctx.input.projectDir,
+  file,
+  project: ctx.input.project,
+  region: ctx.input.region,
+  ...(ctx.input.stage ? { stage: ctx.input.stage } : {}),
+});
 
-    for (const { file, exports } of ctx.handlers) {
-      yield* Effect.logInfo(`Processing ${path.basename(file)} (${exports.length} HTTP handler(s))`);
-
-      const deployInput: DeployInput = {
-        projectDir: ctx.input.projectDir,
-        file,
-        project: ctx.input.project,
-        region: ctx.input.region
-      };
-      if (ctx.input.stage) deployInput.stage = ctx.input.stage;
-
-      for (const fn of exports) {
-        const stage = resolveStage(ctx.input.stage);
-        const resolved = mergeResolved(
-          resolveDeps(fn.depsKeys, ctx.tableNameMap),
-          resolveParams(fn.paramEntries, ctx.input.project, stage)
-        );
-        const observe = fn.config.observe !== false;
-        const withPlatform = {
-          depsEnv: { ...resolved?.depsEnv, ...(observe ? ctx.platformEnv : {}) },
-          depsPermissions: [...(resolved?.depsPermissions ?? []), ...(observe ? ctx.platformPermissions : [])],
-        };
-        const { exportName, functionArn, config } = yield* deployLambda({
-          input: deployInput,
-          fn,
-          ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
-          ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
-          depsEnv: withPlatform.depsEnv,
-          depsPermissions: withPlatform.depsPermissions,
-          ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
-        }).pipe(
-          Effect.provide(
-            Aws.makeClients({
-              lambda: { region: ctx.input.region },
-              iam: { region: ctx.input.region }
-            })
-          )
-        );
-
-        const { apiUrl: handlerUrl } = yield* addRouteToApi({
-          apiId: ctx.apiId,
-          region: ctx.input.region,
-          functionArn,
-          method: config.method,
-          path: config.path
-        }).pipe(
-          Effect.provide(
-            Aws.makeClients({
-              lambda: { region: ctx.input.region },
-              apigatewayv2: { region: ctx.input.region }
-            })
-          )
-        );
-
-        results.push({ exportName, url: handlerUrl, functionArn });
-        yield* Effect.logInfo(`  ${config.method} ${config.path} → ${config.name}`);
-      }
-    }
-
-    return results;
-  });
-
-// ============ Table handlers deployment ============
-
-type DeployTableHandlersInput = {
-  handlers: DiscoveredHandlers["tableHandlers"];
-  input: DeployProjectInput;
-  layerArn: string | undefined;
-  external: string[];
-  tableNameMap: Map<string, string>;
-  platformEnv: Record<string, string>;
-  platformPermissions: readonly string[];
+const resolveHandlerEnv = (
+  depsKeys: string[],
+  paramEntries: ParamEntry[],
+  ctx: DeployTaskCtx,
+) => {
+  const resolved = mergeResolved(
+    resolveDeps(depsKeys, ctx.tableNameMap),
+    resolveParams(paramEntries, ctx.input.project, ctx.stage)
+  );
+  return {
+    depsEnv: resolved?.depsEnv ?? {},
+    depsPermissions: resolved?.depsPermissions ?? [],
+  };
 };
 
-const deployTableHandlers = (ctx: DeployTableHandlersInput) =>
-  Effect.gen(function* () {
-    const results: DeployTableResult[] = [];
+const buildHttpTasks = (
+  ctx: DeployTaskCtx,
+  handlers: DiscoveredHandlers["httpHandlers"],
+  apiId: string,
+  results: DeployResult[],
+): Effect.Effect<void, unknown>[] => {
+  const tasks: Effect.Effect<void, unknown>[] = [];
+  const { region } = ctx.input;
+  for (const { file, exports } of handlers) {
+    for (const fn of exports) {
+      tasks.push(
+        Effect.gen(function* () {
+          const env = resolveHandlerEnv(fn.depsKeys, fn.paramEntries, ctx);
+          const { exportName, functionArn, status, config } = yield* deployLambda({
+            input: makeDeployInput(ctx, file), fn,
+            ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
+            ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
+            depsEnv: env.depsEnv, depsPermissions: env.depsPermissions,
+            ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
+          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region } })));
 
-    for (const { file, exports } of ctx.handlers) {
-      yield* Effect.logInfo(`Processing ${path.basename(file)} (${exports.length} table handler(s))`);
+          const { apiUrl: handlerUrl } = yield* addRouteToApi({
+            apiId, region, functionArn, method: config.method, path: config.path,
+          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, apigatewayv2: { region } })));
 
-      const deployInput: DeployInput = {
-        projectDir: ctx.input.projectDir,
-        file,
-        project: ctx.input.project,
-        region: ctx.input.region
-      };
-      if (ctx.input.stage) deployInput.stage = ctx.input.stage;
-
-      for (const fn of exports) {
-        const stage = resolveStage(ctx.input.stage);
-        const resolved = mergeResolved(
-          resolveDeps(fn.depsKeys, ctx.tableNameMap),
-          resolveParams(fn.paramEntries, ctx.input.project, stage)
-        );
-        const observe = fn.config.observe !== false;
-        const withPlatform = {
-          depsEnv: { ...resolved?.depsEnv, ...(observe ? ctx.platformEnv : {}) },
-          depsPermissions: [...(resolved?.depsPermissions ?? []), ...(observe ? ctx.platformPermissions : [])],
-        };
-        const result = yield* deployTableFunction({
-          input: deployInput,
-          fn,
-          ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
-          ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
-          depsEnv: withPlatform.depsEnv,
-          depsPermissions: withPlatform.depsPermissions,
-          ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
-        }).pipe(
-          Effect.provide(
-            Aws.makeClients({
-              lambda: { region: ctx.input.region },
-              iam: { region: ctx.input.region },
-              dynamodb: { region: ctx.input.region }
-            })
-          )
-        );
-        results.push(result);
-      }
+          results.push({ exportName, url: handlerUrl, functionArn });
+          yield* ctx.logComplete( config.name ?? exportName, "http", status);
+        })
+      );
     }
+  }
+  return tasks;
+};
 
-    return results;
-  });
-
-// ============ App route helpers ============
+const buildTableTasks = (
+  ctx: DeployTaskCtx,
+  handlers: DiscoveredHandlers["tableHandlers"],
+  results: DeployTableResult[],
+): Effect.Effect<void, unknown>[] => {
+  const tasks: Effect.Effect<void, unknown>[] = [];
+  const { region } = ctx.input;
+  for (const { file, exports } of handlers) {
+    for (const fn of exports) {
+      tasks.push(
+        Effect.gen(function* () {
+          const env = resolveHandlerEnv(fn.depsKeys, fn.paramEntries, ctx);
+          const result = yield* deployTableFunction({
+            input: makeDeployInput(ctx, file), fn,
+            ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
+            ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
+            depsEnv: env.depsEnv, depsPermissions: env.depsPermissions,
+            ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
+          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region }, dynamodb: { region } })));
+          results.push(result);
+          yield* ctx.logComplete( fn.config.name ?? fn.exportName, "table", result.status);
+        })
+      );
+    }
+  }
+  return tasks;
+};
 
 /** Build the two API Gateway route paths for an app handler. */
 export function buildAppRoutePaths(configPath: string): [root: string, greedy: string] {
@@ -362,96 +358,95 @@ export function buildAppRoutePaths(configPath: string): [root: string, greedy: s
   return [basePath || "/", `${basePath}/{file+}`];
 }
 
-// ============ App handlers deployment ============
+const buildAppTasks = (
+  ctx: DeployTaskCtx,
+  handlers: DiscoveredHandlers["appHandlers"],
+  apiId: string,
+  results: DeployResult[],
+): Effect.Effect<void, unknown>[] => {
+  const tasks: Effect.Effect<void, unknown>[] = [];
+  const { region } = ctx.input;
+  for (const { file, exports } of handlers) {
+    for (const fn of exports) {
+      tasks.push(
+        Effect.gen(function* () {
+          const { exportName, functionArn, status, config, handlerName } = yield* deployAppLambda({
+            input: makeDeployInput(ctx, file), fn,
+            ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
+            ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
+          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region } })));
 
-type DeployAppHandlersInput = {
-  handlers: DiscoveredHandlers["appHandlers"];
-  apiId: string;
-  input: DeployProjectInput;
-  layerArn: string | undefined;
-  external: string[];
-  platformEnv: Record<string, string>;
-  platformPermissions: readonly string[];
+          const [rootPath, greedyPath] = buildAppRoutePaths(config.path ?? "/");
+          const { apiUrl: rootUrl } = yield* addRouteToApi({
+            apiId, region, functionArn, method: "GET", path: rootPath,
+          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, apigatewayv2: { region } })));
+          yield* addRouteToApi({
+            apiId, region, functionArn, method: "GET", path: greedyPath,
+          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, apigatewayv2: { region } })));
+
+          results.push({ exportName, url: rootUrl, functionArn });
+          yield* ctx.logComplete( handlerName, "app", status);
+        })
+      );
+    }
+  }
+  return tasks;
 };
 
-const deployAppHandlers = (ctx: DeployAppHandlersInput) =>
-  Effect.gen(function* () {
-    const results: DeployResult[] = [];
-
-    for (const { file, exports } of ctx.handlers) {
-      yield* Effect.logInfo(`Processing ${path.basename(file)} (${exports.length} app handler(s))`);
-
-      const deployInput: DeployInput = {
-        projectDir: ctx.input.projectDir,
-        file,
-        project: ctx.input.project,
-        region: ctx.input.region
-      };
-      if (ctx.input.stage) deployInput.stage = ctx.input.stage;
-
-      for (const fn of exports) {
-        const observe = fn.config.observe === true;
-        const withPlatform = {
-          depsEnv: observe ? { ...ctx.platformEnv } : {},
-          depsPermissions: observe ? [...ctx.platformPermissions] : [],
-        };
-        const { exportName, functionArn, config, handlerName } = yield* deployAppLambda({
-          input: deployInput,
-          fn,
-          ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
-          ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
-          depsEnv: withPlatform.depsEnv,
-          depsPermissions: withPlatform.depsPermissions,
-        }).pipe(
-          Effect.provide(
-            Aws.makeClients({
-              lambda: { region: ctx.input.region },
-              iam: { region: ctx.input.region }
-            })
-          )
-        );
-
-        const [rootPath, greedyPath] = buildAppRoutePaths(config.path ?? "/");
-
-        // Route 1: root path (serves index.html)
-        const { apiUrl: rootUrl } = yield* addRouteToApi({
-          apiId: ctx.apiId,
-          region: ctx.input.region,
-          functionArn,
-          method: "GET",
-          path: rootPath
-        }).pipe(
-          Effect.provide(
-            Aws.makeClients({
-              lambda: { region: ctx.input.region },
-              apigatewayv2: { region: ctx.input.region }
-            })
-          )
-        );
-
-        // Route 2: greedy subpath (serves all files)
-        yield* addRouteToApi({
-          apiId: ctx.apiId,
-          region: ctx.input.region,
-          functionArn,
-          method: "GET",
-          path: greedyPath
-        }).pipe(
-          Effect.provide(
-            Aws.makeClients({
-              lambda: { region: ctx.input.region },
-              apigatewayv2: { region: ctx.input.region }
-            })
-          )
-        );
-
-        results.push({ exportName, url: rootUrl, functionArn });
-        yield* Effect.logInfo(`  GET ${rootPath} → ${handlerName} (app)`);
-      }
+const buildStaticSiteTasks = (
+  ctx: DeployTaskCtx,
+  handlers: DiscoveredHandlers["staticSiteHandlers"],
+  results: DeployStaticSiteResult[],
+): Effect.Effect<void, unknown>[] => {
+  const tasks: Effect.Effect<void, unknown>[] = [];
+  const { region } = ctx.input;
+  for (const { exports } of handlers) {
+    for (const fn of exports) {
+      tasks.push(
+        Effect.gen(function* () {
+          const result = yield* deployStaticSite({
+            projectDir: ctx.input.projectDir, project: ctx.input.project,
+            stage: ctx.input.stage, region, fn,
+          }).pipe(Effect.provide(Aws.makeClients({
+            s3: { region }, cloudfront: { region: "us-east-1" },
+            resource_groups_tagging_api: { region: "us-east-1" },
+          })));
+          results.push(result);
+          yield* ctx.logComplete( fn.config.name ?? fn.exportName, "site", "updated");
+        })
+      );
     }
+  }
+  return tasks;
+};
 
-    return results;
-  });
+const buildFifoQueueTasks = (
+  ctx: DeployTaskCtx,
+  handlers: DiscoveredHandlers["fifoQueueHandlers"],
+  results: DeployFifoQueueResult[],
+): Effect.Effect<void, unknown>[] => {
+  const tasks: Effect.Effect<void, unknown>[] = [];
+  const { region } = ctx.input;
+  for (const { file, exports } of handlers) {
+    for (const fn of exports) {
+      tasks.push(
+        Effect.gen(function* () {
+          const env = resolveHandlerEnv(fn.depsKeys, fn.paramEntries, ctx);
+          const result = yield* deployFifoQueueFunction({
+            input: makeDeployInput(ctx, file), fn,
+            ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
+            ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
+            depsEnv: env.depsEnv, depsPermissions: env.depsPermissions,
+            ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
+          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region }, sqs: { region } })));
+          results.push(result);
+          yield* ctx.logComplete( fn.config.name ?? fn.exportName, "queue", result.status);
+        })
+      );
+    }
+  }
+  return tasks;
+};
 
 // ============ Project deployment ============
 
@@ -482,7 +477,7 @@ export const deployProject = (input: DeployProjectInput) =>
       return yield* Effect.fail(new Error(`No files match patterns: ${input.patterns.join(", ")}`));
     }
 
-    yield* Effect.logInfo(`Found ${files.length} file(s) matching patterns`);
+    yield* Effect.logDebug(`Found ${files.length} file(s) matching patterns`);
 
     const { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers } = discoverHandlers(files);
 
@@ -497,25 +492,33 @@ export const deployProject = (input: DeployProjectInput) =>
       return yield* Effect.fail(new Error("No handlers found in matched files"));
     }
 
-    yield* Effect.logInfo(`Discovered ${totalHttpHandlers} HTTP, ${totalTableHandlers} table, ${totalAppHandlers} app, ${totalStaticSiteHandlers} static site, ${totalFifoQueueHandlers} FIFO queue handler(s)`);
+    const parts: string[] = [];
+    if (totalHttpHandlers > 0) parts.push(`${totalHttpHandlers} http`);
+    if (totalTableHandlers > 0) parts.push(`${totalTableHandlers} table`);
+    if (totalAppHandlers > 0) parts.push(`${totalAppHandlers} app`);
+    if (totalStaticSiteHandlers > 0) parts.push(`${totalStaticSiteHandlers} site`);
+    if (totalFifoQueueHandlers > 0) parts.push(`${totalFifoQueueHandlers} queue`);
+    yield* Console.log(`\n  ${c.dim("Handlers:")} ${parts.join(", ")}`);
 
     // Build table name map for deps resolution
     const tableNameMap = buildTableNameMap(tableHandlers, input.project, resolveStage(input.stage));
 
     // Prepare layer
-    const { layerArn, external } = yield* prepareLayer({
+    const { layerArn, layerVersion, layerStatus, external } = yield* prepareLayer({
       project: input.project,
       stage: resolveStage(input.stage),
       region: input.region,
       projectDir: input.projectDir
     });
 
-    // Ensure platform table
-    const stage = resolveStage(input.stage);
-    const platformTableName = yield* ensurePlatformTable(input.project, stage, input.region);
-    const platformEnv = { EFF_PLATFORM_TABLE: platformTableName };
+    if (layerArn && layerStatus) {
+      const status = layerStatus === "cached" ? c.dim("cached") : c.green("created");
+      yield* Console.log(`  ${c.dim("Layer:")} ${status} ${c.dim(`v${layerVersion}`)} (${external.length} packages)`);
+    }
 
-    // Setup API Gateway for HTTP handlers
+    const stage = resolveStage(input.stage);
+
+    // Setup API Gateway for HTTP/app handlers
     let apiId: string | undefined;
     let apiUrl: string | undefined;
 
@@ -526,7 +529,6 @@ export const deployProject = (input: DeployProjectInput) =>
         handler: "api"
       };
 
-      yield* Effect.logInfo("Setting up API Gateway...");
       const api = yield* ensureProjectApi({
         projectName: input.project,
         stage: tagCtx.stage,
@@ -542,115 +544,74 @@ export const deployProject = (input: DeployProjectInput) =>
 
       apiId = api.apiId;
       apiUrl = `https://${apiId}.execute-api.${input.region}.amazonaws.com`;
+      yield* Console.log(`  ${c.dim("API Gateway:")} ${apiId}`);
     }
 
-    // Deploy handlers
-    const httpResults = apiId
-      ? yield* deployHttpHandlers({
-          handlers: httpHandlers,
-          apiId,
-          input,
-          layerArn,
-          external,
-          tableNameMap,
-          platformEnv,
-          platformPermissions: PLATFORM_PERMISSIONS,
-        })
-      : [];
+    yield* Console.log("");
 
-    const tableResults = yield* deployTableHandlers({
-      handlers: tableHandlers,
-      input,
-      layerArn,
-      external,
-      tableNameMap,
-      platformEnv,
-      platformPermissions: PLATFORM_PERMISSIONS,
-    });
+    // Build handler manifest and live progress tracker
+    const manifest: HandlerManifest = [];
+    for (const { exports } of httpHandlers)
+      for (const fn of exports) manifest.push({ name: fn.config.name ?? fn.exportName, type: "http" });
+    for (const { exports } of tableHandlers)
+      for (const fn of exports) manifest.push({ name: fn.config.name ?? fn.exportName, type: "table" });
+    for (const { exports } of appHandlers)
+      for (const fn of exports) manifest.push({ name: fn.config.name ?? fn.exportName, type: "app" });
+    for (const { exports } of staticSiteHandlers)
+      for (const fn of exports) manifest.push({ name: fn.config.name ?? fn.exportName, type: "site" });
+    for (const { exports } of fifoQueueHandlers)
+      for (const fn of exports) manifest.push({ name: fn.config.name ?? fn.exportName, type: "queue" });
 
-    const appResults = apiId
-      ? yield* deployAppHandlers({
-          handlers: appHandlers,
-          apiId,
-          input,
-          layerArn,
-          external,
-          platformEnv,
-          platformPermissions: PLATFORM_PERMISSIONS,
-        })
-      : [];
+    manifest.sort((a, b) => a.name.localeCompare(b.name));
+    const logComplete = createLiveProgress(manifest);
+    const ctx: DeployTaskCtx = {
+      input, layerArn, external, stage, tableNameMap, logComplete,
+    };
 
-    // Deploy static sites (S3 + CloudFront)
+    const httpResults: DeployResult[] = [];
+    const tableResults: DeployTableResult[] = [];
+    const appResults: DeployResult[] = [];
     const staticSiteResults: DeployStaticSiteResult[] = [];
-    for (const { file, exports } of staticSiteHandlers) {
-      yield* Effect.logInfo(`Processing ${path.basename(file)} (${exports.length} static site handler(s))`);
-      for (const fn of exports) {
-        const result = yield* deployStaticSite({
-          projectDir: input.projectDir,
-          project: input.project,
-          stage: input.stage,
-          region: input.region,
-          fn,
-        }).pipe(
-          Effect.provide(
-            Aws.makeClients({
-              s3: { region: input.region },
-              cloudfront: { region: "us-east-1" },
-              resource_groups_tagging_api: { region: "us-east-1" },
-            })
-          )
-        );
-        staticSiteResults.push(result);
-      }
-    }
-
-    // Deploy FIFO queue handlers
     const fifoQueueResults: DeployFifoQueueResult[] = [];
-    for (const { file, exports } of fifoQueueHandlers) {
-      yield* Effect.logInfo(`Processing ${path.basename(file)} (${exports.length} FIFO queue handler(s))`);
 
-      const deployInput: DeployInput = {
-        projectDir: input.projectDir,
-        file,
-        project: input.project,
-        region: input.region,
-      };
-      if (input.stage) deployInput.stage = input.stage;
+    const tasks = [
+      ...(apiId ? buildHttpTasks(ctx, httpHandlers, apiId, httpResults) : []),
+      ...buildTableTasks(ctx, tableHandlers, tableResults),
+      ...(apiId ? buildAppTasks(ctx, appHandlers, apiId, appResults) : []),
+      ...buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults),
+      ...buildFifoQueueTasks(ctx, fifoQueueHandlers, fifoQueueResults),
+    ];
 
-      for (const fn of exports) {
-        const fnStage = resolveStage(input.stage);
-        const resolved = mergeResolved(
-          resolveDeps(fn.depsKeys, tableNameMap),
-          resolveParams(fn.paramEntries, input.project, fnStage)
-        );
-        const observe = fn.config.observe !== false;
-        const withPlatform = {
-          depsEnv: { ...resolved?.depsEnv, ...(observe ? platformEnv : {}) },
-          depsPermissions: [...(resolved?.depsPermissions ?? []), ...(observe ? PLATFORM_PERMISSIONS : [])],
-        };
-        const result = yield* deployFifoQueueFunction({
-          input: deployInput,
-          fn,
-          ...(layerArn ? { layerArn } : {}),
-          ...(external.length > 0 ? { external } : {}),
-          depsEnv: withPlatform.depsEnv,
-          depsPermissions: withPlatform.depsPermissions,
-          ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
-        }).pipe(
-          Effect.provide(
-            Aws.makeClients({
-              lambda: { region: input.region },
-              iam: { region: input.region },
-              sqs: { region: input.region },
-            })
-          )
-        );
-        fifoQueueResults.push(result);
+    yield* Effect.all(tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
+
+    // Remove stale API Gateway routes
+    if (apiId) {
+      const activeRouteKeys = new Set<string>();
+
+      for (const { exports } of httpHandlers) {
+        for (const fn of exports) {
+          activeRouteKeys.add(`${fn.config.method} ${fn.config.path}`);
+        }
       }
+      for (const { exports } of appHandlers) {
+        for (const fn of exports) {
+          const [rootPath, greedyPath] = buildAppRoutePaths(fn.config.path ?? "/");
+          activeRouteKeys.add(`GET ${rootPath}`);
+          activeRouteKeys.add(`GET ${greedyPath}`);
+        }
+      }
+
+      yield* removeStaleRoutes(apiId, activeRouteKeys).pipe(
+        Effect.provide(
+          Aws.makeClients({
+            apigatewayv2: { region: input.region }
+          })
+        )
+      );
     }
 
     if (apiUrl) {
-      yield* Effect.logInfo(`Deployment complete! API: ${apiUrl}`);
+      yield* Effect.logDebug(`Deployment complete! API: ${apiUrl}`);
     }
 
     return { apiId, apiUrl, httpResults, tableResults, appResults, staticSiteResults, fifoQueueResults };

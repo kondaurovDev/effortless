@@ -24,7 +24,7 @@ export const ensureOAC = (input: EnsureOACInput) =>
       return { oacId: existing.Id! };
     }
 
-    yield* Effect.logInfo(`Creating Origin Access Control: ${name}`);
+    yield* Effect.logDebug(`Creating Origin Access Control: ${name}`);
     const createResult = yield* cloudfront.make("create_origin_access_control", {
       OriginAccessControlConfig: {
         Name: name,
@@ -62,7 +62,7 @@ export const ensureUrlRewriteFunction = (name: string) =>
       return { functionArn: existing.FunctionMetadata!.FunctionARN! };
     }
 
-    yield* Effect.logInfo(`Creating CloudFront Function: ${name}`);
+    yield* Effect.logDebug(`Creating CloudFront Function: ${name}`);
     const result = yield* cloudfront.make("create_function", {
       Name: name,
       FunctionConfig: {
@@ -159,7 +159,7 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
         (currentConfig.DefaultCacheBehavior?.FunctionAssociations?.Quantity ?? 0) !== functionAssociations.Quantity;
 
       if (needsUpdate) {
-        yield* Effect.logInfo(`CloudFront distribution ${existing.Id} config changed, updating...`);
+        yield* Effect.logDebug(`CloudFront distribution ${existing.Id} config changed, updating...`);
         const etag = configResult.ETag!;
 
         yield* cloudfront.make("update_distribution", {
@@ -216,7 +216,7 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
     }
 
     // Create new distribution
-    yield* Effect.logInfo("Creating CloudFront distribution (first deploy may take 5-15 minutes)...");
+    yield* Effect.logDebug("Creating CloudFront distribution (first deploy may take 5-15 minutes)...");
 
     const createResult = yield* cloudfront.make("create_distribution_with_tags", {
       DistributionConfigWithTags: {
@@ -285,7 +285,7 @@ const findDistributionByTags = (project: string, stage: string, handlerName: str
 
 export const invalidateDistribution = (distributionId: string) =>
   Effect.gen(function* () {
-    yield* Effect.logInfo(`Invalidating CloudFront distribution: ${distributionId}`);
+    yield* Effect.logDebug(`Invalidating CloudFront distribution: ${distributionId}`);
 
     yield* cloudfront.make("create_invalidation", {
       DistributionId: distributionId,
@@ -301,7 +301,7 @@ export const invalidateDistribution = (distributionId: string) =>
 
 export const disableAndDeleteDistribution = (distributionId: string) =>
   Effect.gen(function* () {
-    yield* Effect.logInfo(`Disabling CloudFront distribution: ${distributionId}`);
+    yield* Effect.logDebug(`Disabling CloudFront distribution: ${distributionId}`);
 
     // Get current config
     const configResult = yield* cloudfront.make("get_distribution_config", {
@@ -347,12 +347,12 @@ export const disableAndDeleteDistribution = (distributionId: string) =>
       });
     }
 
-    yield* Effect.logInfo(`Deleted CloudFront distribution: ${distributionId}`);
+    yield* Effect.logDebug(`Deleted CloudFront distribution: ${distributionId}`);
   });
 
 const waitForDistributionDeployed = (distributionId: string) =>
   Effect.gen(function* () {
-    yield* Effect.logInfo(`Waiting for distribution ${distributionId} to deploy (this may take several minutes)...`);
+    yield* Effect.logDebug(`Waiting for distribution ${distributionId} to deploy (this may take several minutes)...`);
 
     yield* Effect.retry(
       cloudfront.make("get_distribution", { Id: distributionId }).pipe(
@@ -365,7 +365,7 @@ const waitForDistributionDeployed = (distributionId: string) =>
         })
       ),
       {
-        times: 90,
+        times: 45,
         schedule: Schedule.spaced("10 seconds"),
       }
     );
@@ -373,7 +373,7 @@ const waitForDistributionDeployed = (distributionId: string) =>
 
 export const deleteOAC = (oacId: string) =>
   Effect.gen(function* () {
-    yield* Effect.logInfo(`Deleting Origin Access Control: ${oacId}`);
+    yield* Effect.logDebug(`Deleting Origin Access Control: ${oacId}`);
 
     // Get ETag first
     const result = yield* cloudfront.make("list_origin_access_controls", {});

@@ -7,8 +7,6 @@ Planned features for effortless. Some ideas are inspired by serverless community
 
 Since effortless controls both the runtime and the deployment, these features can be integrated deeper than in a standalone library — auto-creating infrastructure, wiring IAM permissions, and reducing boilerplate.
 
-See also: [CLI Roadmap](./roadmap-cli)
-
 ## Features
 
 - [Idempotency](#idempotency)
@@ -410,7 +408,7 @@ Minimal web app backed by the same control plane API:
 - **Team management** — multiple developers, role-based access
 - **Trace viewer** — X-Ray traces visualized in the dashboard
 
-**What makes this powerful**: effortless controls the entire stack (build → deploy → runtime → observability). Unlike generic dashboards, this knows the semantics — it can show a `defineTable` with its stream handler, DLQ, and connected functions as one logical unit.
+**What makes this powerful**: effortless controls the entire stack (build → deploy → runtime). Unlike generic dashboards, this knows the semantics — it can show a `defineTable` with its stream handler, DLQ, and connected functions as one logical unit.
 
 **Status**: Planned
 

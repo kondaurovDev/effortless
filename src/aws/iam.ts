@@ -36,7 +36,7 @@ export const ensureRole = (
     );
 
     if (existingRole) {
-      yield* Effect.logInfo(`Using existing role: ${roleName}`);
+      yield* Effect.logDebug(`Using existing role: ${roleName}`);
 
       if (additionalActions && additionalActions.length > 0) {
         yield* ensureInlinePolicy(roleName, name, additionalActions);
@@ -53,7 +53,7 @@ export const ensureRole = (
       return existingRole.Arn!;
     }
 
-    yield* Effect.logInfo(`Creating role: ${roleName}`);
+    yield* Effect.logDebug(`Creating role: ${roleName}`);
 
     const createResult = yield* iam.make("create_role", {
       RoleName: roleName,
@@ -99,7 +99,7 @@ const ensureInlinePolicy = (roleName: string, functionName: string, actions: str
 
 export const deleteRole = (roleName: string) =>
   Effect.gen(function* () {
-    yield* Effect.logInfo(`Deleting IAM role: ${roleName}`);
+    yield* Effect.logDebug(`Deleting IAM role: ${roleName}`);
 
     // Delete inline policies
     const inlinePolicies = yield* iam.make("list_role_policies", { RoleName: roleName }).pipe(

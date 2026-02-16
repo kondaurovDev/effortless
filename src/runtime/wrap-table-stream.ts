@@ -2,7 +2,6 @@ import { unmarshall } from "@aws-sdk/util-dynamodb";
 import type { TableHandler, TableRecord, FailedRecord } from "~/handlers/define-table";
 import { createTableClient } from "./table-client";
 import { createHandlerRuntime } from "./handler-utils";
-import { truncateForStorage } from "./platform-types";
 
 type DynamoDBStreamRecord = {
   eventName: "INSERT" | "MODIFY" | "REMOVE";
@@ -68,7 +67,7 @@ export const wrapTableStream = <T, C, R>(handler: TableHandler<T, C, R>) => {
     throw new Error("wrapTableStream requires a handler with onRecord or onBatch defined");
   }
 
-  const rt = createHandlerRuntime(handler, "table");
+  const rt = createHandlerRuntime(handler, "table", handler.config.logLevel ?? "info");
   const handleError = handler.onError ?? ((e: unknown) => console.error(`[effortless:${rt.handlerName}]`, e));
 
   let selfClient: ReturnType<typeof createTableClient> | null = null;
@@ -82,69 +81,75 @@ export const wrapTableStream = <T, C, R>(handler: TableHandler<T, C, R>) => {
 
   return async (event: DynamoDBStreamEvent) => {
     const startTime = Date.now();
-    const rawRecords = event.Records ?? [];
-    const input = truncateForStorage({ recordCount: rawRecords.length });
+    rt.patchConsole();
 
-    let records: TableRecord<T>[];
-    let sequenceNumbers: Map<TableRecord<T>, string>;
     try {
-      ({ records, sequenceNumbers } = parseRecords<T>(rawRecords, handler.schema));
-    } catch (error) {
-      handleError(error);
-      rt.logError(startTime, input, error);
-      return { batchItemFailures: rawRecords.map(r => r.dynamodb?.SequenceNumber).filter((s): s is string => !!s).map(seq => ({ itemIdentifier: seq })) };
-    }
+      const rawRecords = event.Records ?? [];
+      const input = { recordCount: rawRecords.length };
 
-    const shared = { ...await rt.commonArgs(), table: getSelfClient() };
-    const batchItemFailures: BatchItemFailure[] = [];
-
-    if (handler.onBatch) {
+      let records: TableRecord<T>[];
+      let sequenceNumbers: Map<TableRecord<T>, string>;
       try {
-        await (handler.onBatch as any)({ records, ...shared });
+        ({ records, sequenceNumbers } = parseRecords<T>(rawRecords, handler.schema));
       } catch (error) {
         handleError(error);
-        batchItemFailures.push(...collectFailures(records, sequenceNumbers));
+        rt.logError(startTime, input, error);
+        return { batchItemFailures: rawRecords.map(r => r.dynamodb?.SequenceNumber).filter((s): s is string => !!s).map(seq => ({ itemIdentifier: seq })) };
       }
-    } else {
-      // Per-record mode
-      const results: R[] = [];
-      const failures: FailedRecord<T>[] = [];
-      const onRecord = handler.onRecord as any;
 
-      for (const record of records) {
+      const shared = { ...await rt.commonArgs(), table: getSelfClient() };
+      const batchItemFailures: BatchItemFailure[] = [];
+
+      if (handler.onBatch) {
         try {
-          const result = await onRecord({ record, ...shared });
-          if (result !== undefined) results.push(result);
+          await (handler.onBatch as any)({ records, ...shared });
         } catch (error) {
           handleError(error);
-          failures.push({ record, error });
-          const seq = sequenceNumbers.get(record);
-          if (seq) batchItemFailures.push({ itemIdentifier: seq });
+          batchItemFailures.push(...collectFailures(records, sequenceNumbers));
         }
-      }
+      } else {
+        // Per-record mode
+        const results: R[] = [];
+        const failures: FailedRecord<T>[] = [];
+        const onRecord = handler.onRecord as any;
 
-      if (handler.onBatchComplete) {
-        try {
-          await (handler.onBatchComplete as any)({ results, failures, ...shared });
-        } catch (error) {
-          handleError(error);
-          // Mark all non-failed records as failed too
-          for (const record of records) {
+        for (const record of records) {
+          try {
+            const result = await onRecord({ record, ...shared });
+            if (result !== undefined) results.push(result);
+          } catch (error) {
+            handleError(error);
+            failures.push({ record, error });
             const seq = sequenceNumbers.get(record);
-            if (seq && !batchItemFailures.some(f => f.itemIdentifier === seq)) {
-              batchItemFailures.push({ itemIdentifier: seq });
+            if (seq) batchItemFailures.push({ itemIdentifier: seq });
+          }
+        }
+
+        if (handler.onBatchComplete) {
+          try {
+            await (handler.onBatchComplete as any)({ results, failures, ...shared });
+          } catch (error) {
+            handleError(error);
+            // Mark all non-failed records as failed too
+            for (const record of records) {
+              const seq = sequenceNumbers.get(record);
+              if (seq && !batchItemFailures.some(f => f.itemIdentifier === seq)) {
+                batchItemFailures.push({ itemIdentifier: seq });
+              }
             }
           }
         }
       }
-    }
 
-    if (batchItemFailures.length > 0) {
-      rt.logError(startTime, input, `${batchItemFailures.length} record(s) failed`);
-    } else {
-      rt.logExecution(startTime, input, { processedCount: records.length });
-    }
+      if (batchItemFailures.length > 0) {
+        rt.logError(startTime, input, `${batchItemFailures.length} record(s) failed`);
+      } else {
+        rt.logExecution(startTime, input, { processedCount: records.length });
+      }
 
-    return { batchItemFailures };
+      return { batchItemFailures };
+    } finally {
+      rt.restoreConsole();
+    }
   };
 };

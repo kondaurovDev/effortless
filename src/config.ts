@@ -51,23 +51,28 @@ export type EffortlessConfig = {
 
   /**
    * Default settings applied to all handlers unless overridden.
+   *
+   * All Lambdas run on ARM64 (Graviton2) architecture — ~20% cheaper than x86_64
+   * with better price-performance for most workloads.
    */
   defaults?: {
     /**
-     * Lambda memory in MB.
+     * Lambda memory in MB. AWS allocates proportional CPU —
+     * 1769 MB gives one full vCPU.
      * @default 256
      */
     memory?: number;
 
     /**
      * Lambda timeout as a human-readable string.
+     * AWS maximum is 15 minutes.
      * @example "30 seconds", "5 minutes"
      */
     timeout?: string;
 
     /**
-     * Lambda runtime.
-     * @default "nodejs22.x"
+     * Node.js Lambda runtime version.
+     * @default "nodejs24.x"
      */
     runtime?: string;
   };

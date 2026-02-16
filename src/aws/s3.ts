@@ -62,7 +62,7 @@ export const ensureBucket = (input: EnsureBucketInput) =>
     );
 
     if (!exists) {
-      yield* Effect.logInfo(`Creating S3 bucket: ${name}`);
+      yield* Effect.logDebug(`Creating S3 bucket: ${name}`);
       yield* s3.make("create_bucket", {
         Bucket: name,
         ...(region !== "us-east-1"
@@ -70,7 +70,7 @@ export const ensureBucket = (input: EnsureBucketInput) =>
           : {}),
       });
     } else {
-      yield* Effect.logInfo(`S3 bucket ${name} already exists`);
+      yield* Effect.logDebug(`S3 bucket ${name} already exists`);
     }
 
     // Block all public access
@@ -190,7 +190,7 @@ export const syncFiles = (input: SyncFilesInput) =>
       }
     }
 
-    yield* Effect.logInfo(`S3 sync: ${uploaded} uploaded, ${deleted} deleted, ${unchanged} unchanged`);
+    yield* Effect.logDebug(`S3 sync: ${uploaded} uploaded, ${deleted} deleted, ${unchanged} unchanged`);
     return { uploaded, deleted, unchanged } satisfies SyncFilesResult;
   });
 
@@ -247,7 +247,7 @@ export const emptyBucket = (bucketName: string) =>
 
 export const deleteBucket = (bucketName: string) =>
   Effect.gen(function* () {
-    yield* Effect.logInfo(`Deleting S3 bucket: ${bucketName}`);
+    yield* Effect.logDebug(`Deleting S3 bucket: ${bucketName}`);
 
     yield* emptyBucket(bucketName).pipe(
       Effect.catchIf(

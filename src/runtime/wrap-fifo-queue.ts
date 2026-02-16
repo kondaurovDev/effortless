@@ -1,6 +1,5 @@
 import type { FifoQueueHandler, FifoQueueMessage } from "~/handlers/define-fifo-queue";
 import { createHandlerRuntime } from "./handler-utils";
-import { truncateForStorage } from "./platform-types";
 
 type SQSRecord = {
   messageId: string;
@@ -64,55 +63,61 @@ export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
     throw new Error("wrapFifoQueue requires a handler with onMessage or onBatch defined");
   }
 
-  const rt = createHandlerRuntime(handler, "fifo-queue");
+  const rt = createHandlerRuntime(handler, "fifo-queue", handler.config.logLevel ?? "info");
   const handleError = handler.onError ?? ((e: unknown) => console.error(`[effortless:${rt.handlerName}]`, e));
 
   return async (event: SQSEvent) => {
     const startTime = Date.now();
-    const rawRecords = event.Records ?? [];
-    const input = truncateForStorage({ messageCount: rawRecords.length });
+    rt.patchConsole();
 
-    let messages: FifoQueueMessage<T>[];
     try {
-      messages = parseMessages<T>(rawRecords, handler.schema);
-    } catch (error) {
-      handleError(error);
-      rt.logError(startTime, input, error);
-      return {
-        batchItemFailures: rawRecords.map(r => ({ itemIdentifier: r.messageId })),
-      };
-    }
+      const rawRecords = event.Records ?? [];
+      const input = { messageCount: rawRecords.length };
 
-    const shared = await rt.commonArgs();
-    const batchItemFailures: BatchItemFailure[] = [];
-
-    if (handler.onBatch) {
+      let messages: FifoQueueMessage<T>[];
       try {
-        await (handler.onBatch as any)({ messages, ...shared });
+        messages = parseMessages<T>(rawRecords, handler.schema);
       } catch (error) {
         handleError(error);
-        for (const message of messages) {
-          batchItemFailures.push({ itemIdentifier: message.messageId });
-        }
+        rt.logError(startTime, input, error);
+        return {
+          batchItemFailures: rawRecords.map(r => ({ itemIdentifier: r.messageId })),
+        };
       }
-    } else {
-      const onMessage = handler.onMessage as any;
-      for (const message of messages) {
+
+      const shared = await rt.commonArgs();
+      const batchItemFailures: BatchItemFailure[] = [];
+
+      if (handler.onBatch) {
         try {
-          await onMessage({ message, ...shared });
+          await (handler.onBatch as any)({ messages, ...shared });
         } catch (error) {
           handleError(error);
-          batchItemFailures.push({ itemIdentifier: message.messageId });
+          for (const message of messages) {
+            batchItemFailures.push({ itemIdentifier: message.messageId });
+          }
+        }
+      } else {
+        const onMessage = handler.onMessage as any;
+        for (const message of messages) {
+          try {
+            await onMessage({ message, ...shared });
+          } catch (error) {
+            handleError(error);
+            batchItemFailures.push({ itemIdentifier: message.messageId });
+          }
         }
       }
-    }
 
-    if (batchItemFailures.length > 0) {
-      rt.logError(startTime, input, `${batchItemFailures.length} message(s) failed`);
-    } else {
-      rt.logExecution(startTime, input, { processedCount: messages.length });
-    }
+      if (batchItemFailures.length > 0) {
+        rt.logError(startTime, input, `${batchItemFailures.length} message(s) failed`);
+      } else {
+        rt.logExecution(startTime, input, { processedCount: messages.length });
+      }
 
-    return { batchItemFailures };
+      return { batchItemFailures };
+    } finally {
+      rt.restoreConsole();
+    }
   };
 };

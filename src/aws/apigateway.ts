@@ -29,7 +29,7 @@ export const ensureProjectApi = (config: ProjectApiConfig) =>
     let apiId: string;
 
     if (existingApi) {
-      yield* Effect.logInfo(`Using existing API Gateway: ${apiName}`);
+      yield* Effect.logDebug(`Using existing API Gateway: ${apiName}`);
       apiId = existingApi.ApiId!;
 
       if (config.tags) {
@@ -40,7 +40,7 @@ export const ensureProjectApi = (config: ProjectApiConfig) =>
         });
       }
     } else {
-      yield* Effect.logInfo(`Creating API Gateway: ${apiName}`);
+      yield* Effect.logDebug(`Creating API Gateway: ${apiName}`);
 
       const createResult = yield* apigatewayv2.make("create_api", {
         Name: apiName,
@@ -95,13 +95,24 @@ export const addRouteToApi = (config: RouteConfig) =>
     const existingRoutes = yield* apigatewayv2.make("get_routes", { ApiId: config.apiId });
     const existingRoute = existingRoutes.Items?.find(r => r.RouteKey === routeKey);
 
+    const target = `integrations/${integrationId}`;
+
     if (!existingRoute) {
-      yield* Effect.logInfo(`Creating route: ${routeKey}`);
+      yield* Effect.logDebug(`Creating route: ${routeKey}`);
 
       yield* apigatewayv2.make("create_route", {
         ApiId: config.apiId,
         RouteKey: routeKey,
-        Target: `integrations/${integrationId}`
+        Target: target
+      });
+    } else if (existingRoute.Target !== target) {
+      yield* Effect.logDebug(`Updating route target: ${routeKey}`);
+
+      yield* apigatewayv2.make("update_route", {
+        ApiId: config.apiId,
+        RouteId: existingRoute.RouteId!,
+        RouteKey: routeKey,
+        Target: target
       });
     } else {
       yield* Effect.logDebug(`Route already exists: ${routeKey}`);
@@ -142,9 +153,44 @@ const addLambdaPermission = (
     );
   });
 
+export const removeStaleRoutes = (apiId: string, activeRouteKeys: Set<string>) =>
+  Effect.gen(function* () {
+    const existingRoutes = yield* apigatewayv2.make("get_routes", { ApiId: apiId });
+
+    for (const route of existingRoutes.Items ?? []) {
+      if (route.RouteKey && !activeRouteKeys.has(route.RouteKey)) {
+        yield* Effect.logDebug(`Removing stale route: ${route.RouteKey}`);
+
+        yield* apigatewayv2.make("delete_route", {
+          ApiId: apiId,
+          RouteId: route.RouteId!
+        });
+
+        // Clean up the integration if it's no longer used by any other route
+        const integrationId = route.Target?.replace("integrations/", "");
+        if (integrationId) {
+          const remainingRoutes = yield* apigatewayv2.make("get_routes", { ApiId: apiId });
+          const stillUsed = remainingRoutes.Items?.some(r => r.Target === route.Target);
+          if (!stillUsed) {
+            yield* Effect.logDebug(`Removing orphaned integration: ${integrationId}`);
+            yield* apigatewayv2.make("delete_integration", {
+              ApiId: apiId,
+              IntegrationId: integrationId
+            }).pipe(
+              Effect.catchIf(
+                e => e._tag === "ApiGatewayV2Error" && e.is("NotFoundException"),
+                () => Effect.logDebug(`Integration ${integrationId} already removed`)
+              )
+            );
+          }
+        }
+      }
+    }
+  });
+
 export const deleteApi = (apiId: string) =>
   Effect.gen(function* () {
-    yield* Effect.logInfo(`Deleting API Gateway: ${apiId}`);
+    yield* Effect.logDebug(`Deleting API Gateway: ${apiId}`);
 
     yield* apigatewayv2.make("delete_api", {
       ApiId: apiId

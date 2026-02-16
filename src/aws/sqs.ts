@@ -41,7 +41,7 @@ export const ensureFifoQueue = (input: EnsureFifoQueueInput) =>
     let queueUrl: string;
 
     if (!existingUrl) {
-      yield* Effect.logInfo(`Creating FIFO queue ${queueName}...`);
+      yield* Effect.logDebug(`Creating FIFO queue ${queueName}...`);
       const result = yield* sqs.make("create_queue", {
         QueueName: queueName,
         Attributes: {
@@ -54,7 +54,7 @@ export const ensureFifoQueue = (input: EnsureFifoQueueInput) =>
       });
       queueUrl = result.QueueUrl!;
     } else {
-      yield* Effect.logInfo(`FIFO queue ${queueName} already exists`);
+      yield* Effect.logDebug(`FIFO queue ${queueName} already exists`);
       queueUrl = existingUrl;
 
       // Update attributes if needed
@@ -108,7 +108,7 @@ export const ensureSqsEventSourceMapping = (input: EnsureSqsEventSourceMappingIn
     const existing = existingMappings.EventSourceMappings?.[0];
 
     if (existing) {
-      yield* Effect.logInfo("Updating SQS event source mapping...");
+      yield* Effect.logDebug("Updating SQS event source mapping...");
       yield* lambda.make("update_event_source_mapping", {
         UUID: existing.UUID!,
         FunctionName: functionArn,
@@ -120,7 +120,7 @@ export const ensureSqsEventSourceMapping = (input: EnsureSqsEventSourceMappingIn
       return existing.UUID!;
     }
 
-    yield* Effect.logInfo("Creating SQS event source mapping...");
+    yield* Effect.logDebug("Creating SQS event source mapping...");
     const result = yield* lambda.make("create_event_source_mapping", {
       FunctionName: functionArn,
       EventSourceArn: queueArn,
@@ -137,7 +137,7 @@ export const deleteFifoQueue = (queueName: string) =>
   Effect.gen(function* () {
     const name = queueName.endsWith(".fifo") ? queueName : `${queueName}.fifo`;
 
-    yield* Effect.logInfo(`Deleting SQS queue: ${name}`);
+    yield* Effect.logDebug(`Deleting SQS queue: ${name}`);
 
     const urlResult = yield* sqs.make("get_queue_url", {
       QueueName: name,

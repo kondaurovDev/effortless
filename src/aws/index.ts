@@ -1,6 +1,6 @@
 // Lambda
 export { ensureLambda, deleteLambda } from "./lambda";
-export type { LambdaConfig } from "./lambda";
+export type { LambdaConfig, LambdaStatus } from "./lambda";
 
 // IAM
 export { ensureRole, deleteRole, listEffortlessRoles } from "./iam";
@@ -11,12 +11,12 @@ export { ensureTable, deleteTable, ensureEventSourceMapping } from "./dynamodb";
 export type { EnsureTableInput, EnsureTableResult, EnsureEventSourceMappingInput, KeyType, StreamView } from "./dynamodb";
 
 // API Gateway
-export { ensureProjectApi, addRouteToApi, deleteApi } from "./apigateway";
+export { ensureProjectApi, addRouteToApi, removeStaleRoutes, deleteApi } from "./apigateway";
 export type { ProjectApiConfig, RouteConfig, HttpMethod } from "./apigateway";
 
 // Layer
 export { ensureLayer, readProductionDependencies, computeLockfileHash, collectLayerPackages, listLayerVersions, deleteAllLayerVersions, deleteLayerVersion } from "./layer";
-export type { LayerConfig, LayerResult, LayerVersionInfo } from "./layer";
+export type { LayerConfig, LayerResult, LayerStatus, LayerVersionInfo } from "./layer";
 
 // S3
 export { ensureBucket, syncFiles, putBucketPolicyForOAC, emptyBucket, deleteBucket } from "./s3";

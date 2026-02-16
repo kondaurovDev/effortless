@@ -6,6 +6,7 @@ import * as fs from "fs";
 import { bundle, extractConfigs, extractTableConfigs, findHandlerFiles, discoverHandlers } from "~/build/bundle";
 import { collectLayerPackages, readProductionDependencies } from "../../aws";
 import { loadConfig, verboseOption, outputOption, getPatternsFromConfig } from "~/cli/config";
+import { c } from "~/cli/colors";
 
 const buildFileArg = Args.file({ name: "file", exists: "yes" }).pipe(
   Args.withDescription("Handler file to build"),
@@ -70,7 +71,7 @@ export const buildCommand = Command.make(
                 const outputName = exportName === "default" ? baseName : `${baseName}-${exportName}`;
                 const outputPath = path.join(outputDir, `${outputName}.mjs`);
 
-                yield* Console.log(`Building [http] ${relativePath}:${exportName}...`);
+                yield* Console.log(`Building ${c.cyan("[http]")} ${c.bold(relativePath)}:${exportName}...`);
 
                 const bundled = yield* bundle({
                   projectDir,
@@ -81,7 +82,7 @@ export const buildCommand = Command.make(
 
                 fs.writeFileSync(outputPath, bundled);
                 const size = (Buffer.byteLength(bundled) / 1024).toFixed(1);
-                yield* Console.log(`  -> ${outputPath} (${size} KB)`);
+                yield* Console.log(`  -> ${outputPath} ${c.dim(`(${size} KB)`)}`);
                 builtCount++;
               }
             }
@@ -94,7 +95,7 @@ export const buildCommand = Command.make(
                 const outputName = exportName === "default" ? baseName : `${baseName}-${exportName}`;
                 const outputPath = path.join(outputDir, `${outputName}.mjs`);
 
-                yield* Console.log(`Building [table] ${relativePath}:${exportName}...`);
+                yield* Console.log(`Building ${c.cyan("[table]")} ${c.bold(relativePath)}:${exportName}...`);
 
                 const bundled = yield* bundle({
                   projectDir,
@@ -106,12 +107,12 @@ export const buildCommand = Command.make(
 
                 fs.writeFileSync(outputPath, bundled);
                 const size = (Buffer.byteLength(bundled) / 1024).toFixed(1);
-                yield* Console.log(`  -> ${outputPath} (${size} KB)`);
+                yield* Console.log(`  -> ${outputPath} ${c.dim(`(${size} KB)`)}`);
                 builtCount++;
               }
             }
 
-            yield* Console.log(`\nBuilt ${builtCount} handler(s) to ${outputDir}`);
+            yield* Console.log(c.green(`\nBuilt ${builtCount} handler(s) to ${outputDir}`));
           }),
         onSome: (filePath) =>
           Effect.gen(function* () {
@@ -132,7 +133,7 @@ export const buildCommand = Command.make(
                 const outputName = exportName === "default" ? baseName : `${baseName}-${exportName}`;
                 const outputPath = path.join(outputDir, `${outputName}.mjs`);
 
-                yield* Console.log(`Building [table] ${exportName}...`);
+                yield* Console.log(`Building ${c.cyan("[table]")} ${c.bold(exportName)}...`);
 
                 const bundled = yield* bundle({
                   projectDir,
@@ -144,7 +145,7 @@ export const buildCommand = Command.make(
 
                 fs.writeFileSync(outputPath, bundled);
                 const size = (Buffer.byteLength(bundled) / 1024).toFixed(1);
-                yield* Console.log(`  -> ${outputPath} (${size} KB)`);
+                yield* Console.log(`  -> ${outputPath} ${c.dim(`(${size} KB)`)}`);
               }
             } else {
               const configs = extractConfigs(source);
@@ -159,7 +160,7 @@ export const buildCommand = Command.make(
                 const outputName = exportName === "default" ? baseName : `${baseName}-${exportName}`;
                 const outputPath = path.join(outputDir, `${outputName}.mjs`);
 
-                yield* Console.log(`Building [http] ${exportName}...`);
+                yield* Console.log(`Building ${c.cyan("[http]")} ${c.bold(exportName)}...`);
 
                 const bundled = yield* bundle({
                   projectDir,
@@ -170,7 +171,7 @@ export const buildCommand = Command.make(
 
                 fs.writeFileSync(outputPath, bundled);
                 const size = (Buffer.byteLength(bundled) / 1024).toFixed(1);
-                yield* Console.log(`  -> ${outputPath} (${size} KB)`);
+                yield* Console.log(`  -> ${outputPath} ${c.dim(`(${size} KB)`)}`);
               }
             }
 

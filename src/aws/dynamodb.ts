@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schedule } from "effect";
 import { dynamodb, lambda } from "./clients";
 
 import { toAwsTagList } from "./tags";
@@ -39,28 +39,22 @@ export type EnsureTableResult = {
 };
 
 const waitForTableActive = (tableName: string) =>
-  Effect.gen(function* () {
-    const maxAttempts = 30;
-    const delayMs = 2000;
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const result = yield* dynamodb.make("describe_table", { TableName: tableName });
-      const status = result.Table?.TableStatus;
-
-      if (status === "ACTIVE") {
-        return result.Table;
-      }
-
-      if (status === "CREATING" || status === "UPDATING") {
-        yield* Effect.sleep(delayMs);
-        continue;
-      }
-
-      return yield* Effect.fail(new Error(`Table ${tableName} is in unexpected state: ${status}`));
+  Effect.retry(
+    dynamodb.make("describe_table", { TableName: tableName }).pipe(
+      Effect.flatMap(r => {
+        const status = r.Table?.TableStatus;
+        if (status === "ACTIVE") return Effect.succeed(r.Table!);
+        if (status === "CREATING" || status === "UPDATING") {
+          return Effect.fail(new Error(`Table ${tableName} status: ${status}`));
+        }
+        return Effect.die(new Error(`Table ${tableName} is in unexpected state: ${status}`));
+      })
+    ),
+    {
+      times: 15,
+      schedule: Schedule.spaced("2 seconds"),
     }
-
-    return yield* Effect.fail(new Error(`Timeout waiting for table ${tableName} to become active`));
-  });
+  );
 
 const ensureTimeToLive = (tableName: string, attributeName: string) =>
   Effect.gen(function* () {

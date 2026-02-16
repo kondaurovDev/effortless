@@ -41,7 +41,6 @@ export default defineConfig({
           items: [
             { label: "Handlers", slug: "handlers" },
             { label: "Architecture", slug: "architecture" },
-            { label: "Observability", slug: "observability" },
           ],
         },
         {
@@ -50,7 +49,6 @@ export default defineConfig({
             { label: "Why AWS?", slug: "why-aws" },
             { label: "Comparisons", slug: "comparisons" },
             { label: "Roadmap", slug: "roadmap" },
-            { label: "CLI Roadmap", slug: "roadmap-cli" },
           ],
         },
       ],

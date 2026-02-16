@@ -42,7 +42,7 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
       handler: handlerName
     };
 
-    yield* Effect.logInfo("Creating DynamoDB table...");
+    yield* Effect.logDebug("Creating DynamoDB table...");
     const tableName = `${input.project}-${tagCtx.stage}-${handlerName}`;
     const { tableArn, streamArn } = yield* ensureTable({
       name: tableName,
@@ -56,7 +56,7 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
     // Merge EFF_TABLE_SELF (own table name) into deps env vars
     const selfEnv: Record<string, string> = { EFF_TABLE_SELF: tableName, ...depsEnv };
 
-    const { functionArn } = yield* deployCoreLambda({
+    const { functionArn, status } = yield* deployCoreLambda({
       input,
       exportName,
       handlerName,
@@ -72,7 +72,7 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
       ...(staticGlobs && staticGlobs.length > 0 ? { staticGlobs } : {})
     });
 
-    yield* Effect.logInfo("Setting up event source mapping...");
+    yield* Effect.logDebug("Setting up event source mapping...");
     yield* ensureEventSourceMapping({
       functionArn,
       streamArn,
@@ -81,14 +81,15 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
       startingPosition: config.startingPosition ?? "LATEST"
     });
 
-    yield* Effect.logInfo(`Table deployment complete! Table: ${tableArn}`);
+    yield* Effect.logDebug(`Table deployment complete! Table: ${tableArn}`);
 
     return {
       exportName,
       functionArn,
+      status,
       tableArn,
       streamArn
-    } satisfies DeployTableResult;
+    };
   });
 
 export const deployTable = (input: DeployInput) =>
@@ -139,7 +140,7 @@ export const deployAllTables = (input: DeployInput) =>
       return yield* Effect.fail(new Error("No defineTable exports found in source"));
     }
 
-    yield* Effect.logInfo(`Found ${functions.length} table handler(s) to deploy`);
+    yield* Effect.logDebug(`Found ${functions.length} table handler(s) to deploy`);
 
     // Ensure layer exists
     const { layerArn, external } = yield* ensureLayerAndExternal({

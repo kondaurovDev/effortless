@@ -50,7 +50,7 @@ export default defineConfig({
   defaults: {
     memory: 256,
     timeout: "30 seconds",
-    runtime: "nodejs22.x",
+    runtime: "nodejs24.x",
   },
 });
 ```
