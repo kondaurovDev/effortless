@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-import type { AnyParamRef, LogLevel } from "~/deploy/shared";
+import type { AnyParamRef, LogLevel } from "~/helpers";
 import { createTableClient } from "./table-client";
 import { getParameters } from "./ssm-client";
 

@@ -1,4 +1,4 @@
-import type { LambdaWithPermissions, AnyParamRef, ResolveParams } from "../deploy/shared";
+import type { LambdaWithPermissions, AnyParamRef, ResolveParams } from "../helpers";
 import type { TableClient } from "../runtime/table-client";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

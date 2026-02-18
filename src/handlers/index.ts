@@ -42,7 +42,7 @@ export type {
 export type { TableClient, QueryParams } from "../runtime/table-client";
 
 // Helpers
-export { typed } from "../deploy/shared";
+export { typed } from "../helpers";
 
 // Permissions
-export type { Permission } from "../deploy/shared";
+export type { Permission } from "../helpers";

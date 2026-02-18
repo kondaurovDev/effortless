@@ -1,4 +1,4 @@
-import type { LambdaWithPermissions, AnyParamRef, ResolveParams } from "../deploy/shared";
+import type { LambdaWithPermissions, AnyParamRef, ResolveParams } from "../helpers";
 import type { TableHandler } from "./define-table";
 import type { TableClient } from "~/runtime/table-client";
 

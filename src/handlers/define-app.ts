@@ -1,4 +1,4 @@
-import type { LambdaConfig } from "../deploy/shared";
+import type { LambdaConfig } from "../helpers";
 
 /**
  * Configuration for a Lambda-served static site (API Gateway + Lambda)
