@@ -9,9 +9,10 @@ import { statusCommand } from "./commands/status";
 import { cleanupCommand } from "./commands/cleanup";
 import { logsCommand } from "./commands/logs";
 import { layerCommand } from "./commands/layer";
+import { configCommand } from "./commands/config";
 
 const mainCommand = Command.make("eff").pipe(
-  Command.withSubcommands([deployCommand, statusCommand, logsCommand, cleanupCommand, layerCommand]),
+  Command.withSubcommands([deployCommand, statusCommand, logsCommand, cleanupCommand, layerCommand, configCommand]),
   Command.withDescription("Code-first AWS Lambda framework")
 );
 

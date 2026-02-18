@@ -289,7 +289,39 @@ export const checkout = defineHttp({
 });
 ```
 
-Store the secret in SSM first: `aws ssm put-parameter --name /my-app/dev/stripe/secret-key --value sk_... --type SecureString`. See [HTTP API — Using secrets](/use-cases/http-api/#using-secrets).
+Create the secret with `npx eff config set stripe/secret-key` or manually via `aws ssm put-parameter --name /my-app/dev/stripe/secret-key --value sk_... --type SecureString`. If you forget, `eff deploy` warns about missing parameters. See [HTTP API — Using secrets](/use-cases/http-api/#using-secrets) and [CLI — config](/cli/#config).
+
+### Why SSM Parameter Store and not Secrets Manager?
+
+AWS has two main services for storing secrets: **SSM Parameter Store** and **AWS Secrets Manager**. Effortless uses Parameter Store because it covers the vast majority of serverless use cases with less cost and complexity.
+
+| | SSM Parameter Store | AWS Secrets Manager |
+|---|---|---|
+| **Cost** | Free (standard tier) | $0.40/secret/month + API calls |
+| **Encryption** | SecureString via KMS | Always encrypted via KMS |
+| **API** | `GetParameters` (batch up to 10) | `GetSecretValue` (one at a time) |
+| **Rotation** | Manual | Built-in automatic rotation |
+| **Use case** | API keys, tokens, connection strings, config | Database credentials with automatic rotation |
+
+Secrets Manager's main advantage is **automatic credential rotation** — it can rotate RDS/Aurora passwords on a schedule without code changes. If you're connecting to RDS via connection strings, that matters. For everything else (API keys, tokens, webhook secrets, feature flags), Parameter Store with `SecureString` type does the same job for free.
+
+Other AWS configuration services and why they're not used:
+
+- **AWS AppConfig** — designed for feature flags and gradual rollouts with validation. Overkill for secrets and static config values.
+- **Environment variables** — Effortless stores only SSM *paths* in env vars, never actual secret values. This prevents secrets from appearing in the Lambda console, deployment logs, or CloudFormation outputs.
+
+If you need Secrets Manager for a specific use case (e.g., RDS credentials with rotation), you can call it directly from your handler code with the appropriate `permissions`:
+
+```typescript
+export const dbHandler = defineHttp({
+  method: "GET",
+  path: "/data",
+  permissions: ["secretsmanager:GetSecretValue"],
+  onRequest: async ({ req }) => {
+    // Call Secrets Manager directly when you need rotation support
+  },
+});
+```
 
 ---
 

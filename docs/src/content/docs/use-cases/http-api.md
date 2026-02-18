@@ -160,7 +160,15 @@ export const checkout = defineHttp({
 });
 ```
 
-Store the secret in SSM with `aws ssm put-parameter --name /my-service/dev/stripe/secret-key --value sk_test_... --type SecureString`. Effortless reads it at `/${project}/${stage}/${key}`.
+Create the secret in SSM using the CLI:
+
+```bash
+npx eff config set stripe/secret-key --stage dev
+```
+
+Or manually: `aws ssm put-parameter --name /my-service/dev/stripe/secret-key --value sk_test_... --type SecureString`.
+
+Effortless reads parameters at `/${project}/${stage}/${key}`. If you forget to create a parameter, `eff deploy` will warn you about missing values.
 
 ## See also
 

@@ -21,9 +21,10 @@ npx eff cleanup --handler createUser --all
 ### Typical workflow
 
 1. Write handlers using `defineHttp`, `defineTable`, etc.
-2. Run `eff deploy` — creates all AWS resources automatically
-3. Remove or rename a handler → run `eff deploy` again (stale API routes are cleaned up)
-4. To remove orphaned Lambdas/tables, run `eff cleanup` to see what's left, then `eff cleanup --all` to delete
+2. If handlers use `param()` for secrets — run `eff config` to set missing values
+3. Run `eff deploy` — creates all AWS resources automatically (warns about missing parameters)
+4. Remove or rename a handler → run `eff deploy` again (stale API routes are cleaned up)
+5. To remove orphaned Lambdas/tables, run `eff cleanup` to see what's left, then `eff cleanup --all` to delete
 
 :::tip
 All commands read project name, stage, and region from `effortless.config.ts` — you rarely need to pass `--project` or `--region` manually.
@@ -69,6 +70,7 @@ npx eff deploy createUser
 - Uploads static sites to S3 + CloudFront
 - Removes stale API Gateway routes that no longer have a matching handler
 - Creates a shared dependency layer from `dependencies` in `package.json`
+- Warns about missing SSM parameters declared via `param()` (see [`config`](#config))
 
 :::note
 If you remove a handler from your code, the API Gateway route will be cleaned up automatically on the next deploy. However, the Lambda function, IAM role, and other resources (DynamoDB tables, SQS queues, etc.) will remain in AWS. Use [`cleanup`](#cleanup) to remove orphaned resources.
@@ -189,6 +191,87 @@ npx eff cleanup --roles --all
 | `--stage <name>` | `-s` | Deployment stage | `"dev"` |
 | `--region <name>` | `-r` | AWS region | `"eu-central-1"` |
 | `--verbose` | `-v` | Show detailed output | |
+
+## config
+
+Manage SSM Parameter Store values used by your handlers.
+
+Handlers declare config parameters via `config: { stripeKey: param("stripe/secret-key") }`. The CLI discovers all declared parameters from your code and helps you create, list, and update them in AWS.
+
+```bash
+# Interactive setup — prompts for each missing parameter
+npx eff config
+
+# List all parameters and their status
+npx eff config list
+
+# Set a specific parameter
+npx eff config set stripe/secret-key
+```
+
+### Default (interactive setup)
+
+```bash
+npx eff config [options]
+```
+
+Discovers all `param()` declarations from your handlers, checks which SSM parameters exist, and interactively prompts for missing ones. Each value is stored as `SecureString`.
+
+```
+Missing parameters (my-service / dev)
+
+? /my-service/dev/stripe/secret-key (checkout): sk_test_...
+  ✓ created
+? /my-service/dev/webhook-secret (checkout): whsec_...
+  ✓ created
+
+  Created 2 parameter(s) (SecureString)
+```
+
+Empty input skips the parameter.
+
+### list
+
+```bash
+npx eff config list [options]
+```
+
+Shows all declared parameters with their status:
+
+```
+Config parameters (my-service / dev)
+
+  ✓ checkout  /my-service/dev/stripe/secret-key  set
+  ✗ checkout  /my-service/dev/webhook-secret      missing
+
+  1 missing — run npx eff config to set them
+```
+
+### set
+
+```bash
+npx eff config set <key> [options]
+```
+
+Create or update a specific parameter. The full SSM path is built automatically: `/${project}/${stage}/${key}`.
+
+```bash
+npx eff config set stripe/secret-key --stage prod
+# prompts for value, stores as SecureString at /my-service/prod/stripe/secret-key
+```
+
+**Options (all subcommands):**
+
+| Flag | Alias | Description | Default |
+|------|-------|-------------|---------|
+| `--project <name>` | `-p` | Project name (or `name` in config) | from config |
+| `--stage <name>` | `-s` | Deployment stage | `"dev"` |
+| `--region <name>` | `-r` | AWS region | `"eu-central-1"` |
+| `--verbose` | `-v` | Show detailed output | |
+
+:::tip
+`eff deploy` automatically warns about missing parameters before deploying. You don't need to run `eff config list` separately — just deploy and follow the hint.
+:::
 
 ## layer
 

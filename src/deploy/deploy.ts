@@ -14,6 +14,7 @@ import {
 } from "../aws";
 import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "~/build/bundle";
 import type { ParamEntry } from "~/build/handler-registry";
+import { collectRequiredParams, checkMissingParams } from "./resolve-config";
 
 // Re-export from shared
 export {
@@ -499,6 +500,23 @@ export const deployProject = (input: DeployProjectInput) =>
     if (totalStaticSiteHandlers > 0) parts.push(`${totalStaticSiteHandlers} site`);
     if (totalFifoQueueHandlers > 0) parts.push(`${totalFifoQueueHandlers} queue`);
     yield* Console.log(`\n  ${c.dim("Handlers:")} ${parts.join(", ")}`);
+
+    // Check for missing SSM parameters
+    const discovered = { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers };
+    const requiredParams = collectRequiredParams(discovered, input.project, resolveStage(input.stage));
+    if (requiredParams.length > 0) {
+      const { missing } = yield* checkMissingParams(requiredParams).pipe(
+        Effect.provide(Aws.makeClients({ ssm: { region: input.region } }))
+      );
+      if (missing.length > 0) {
+        const stageLabel = resolveStage(input.stage);
+        yield* Console.log(`\n  ${c.yellow("⚠")} Missing ${missing.length} SSM parameter(s):\n`);
+        for (const p of missing) {
+          yield* Console.log(`    ${c.dim(p.handlerName)} → ${c.yellow(p.ssmPath)}`);
+        }
+        yield* Console.log(`\n  Run: ${c.cyan(`npx eff config --stage ${stageLabel}`)}`);
+      }
+    }
 
     // Build table name map for deps resolution
     const tableNameMap = buildTableNameMap(tableHandlers, input.project, resolveStage(input.stage));
