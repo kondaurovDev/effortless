@@ -70,6 +70,7 @@ export default defineConfig({
             { label: "Why Effortless?", slug: "why-effortless" },
             { label: "Installation", slug: "installation" },
             { label: "Configuration", slug: "configuration" },
+            { label: "Definitions", slug: "definitions" },
             { label: "CLI", slug: "cli" },
           ],
         },
@@ -83,16 +84,11 @@ export default defineConfig({
           ],
         },
         {
-          label: "Reference",
-          items: [
-            { label: "Handlers", slug: "handlers" },
-            { label: "Architecture", slug: "architecture" },
-          ],
-        },
-        {
           label: "Resources",
           items: [
             { label: "Why AWS?", slug: "why-aws" },
+            { label: "FAQ", slug: "faq" },
+            { label: "Architecture", slug: "architecture" },
             { label: "Comparisons", slug: "comparisons" },
             { label: "Roadmap", slug: "roadmap" },
           ],

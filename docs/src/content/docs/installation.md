@@ -83,6 +83,6 @@ That's it. Lambda + API Gateway + IAM role created in ~10 seconds.
 
 ## Next steps
 
-- [Handlers](/handlers/) — all handler types and their options
+- [Definitions](/definitions/) — all definition types and their options
 - [Configuration](/configuration/) — project and per-handler config
 - [CLI](/cli/) — available commands

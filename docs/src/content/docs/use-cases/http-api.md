@@ -164,5 +164,5 @@ Store the secret in SSM with `aws ssm put-parameter --name /my-service/dev/strip
 
 ## See also
 
-- [Handlers reference — defineHttp](/handlers/#definehttp) — all configuration options
+- [Definitions reference — defineHttp](/definitions/#definehttp) — all configuration options
 - [Architecture — Inter-handler dependencies](/architecture/#inter-handler-dependencies-deps) — how deps wiring works

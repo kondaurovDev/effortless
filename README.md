@@ -1,7 +1,7 @@
 # effortless-aws
 
 [![npm version](https://img.shields.io/npm/v/effortless-aws)](https://www.npmjs.com/package/effortless-aws)
-[![npm downloads](https://img.shields.io/npm/dm/effortless-aws)](https://www.npmjs.com/package/effortless-aws)
+[![npm downloads](https://img.shields.io/npm/dw/effortless-aws)](https://www.npmjs.com/package/effortless-aws)
 
 TypeScript framework for AWS serverless. Export handlers, deploy with one command. No YAML, no CloudFormation, no state files.
 

@@ -1,18 +1,45 @@
 ---
-title: Handlers
-description: All handler types — defineHttp, defineTable, defineApp, defineStaticSite, defineFifoQueue, defineSchedule, defineEvent, defineS3.
+title: Definitions
+description: All definition types — defineHttp, defineTable, defineApp, defineStaticSite, defineFifoQueue, defineSchedule, defineEvent, defineS3.
 ---
 
-| Handler | Status |
-|---------|--------|
-| [defineHttp](#definehttp) | Available |
-| [defineTable](#definetable) | Available |
-| [defineApp](#defineapp) | Available |
-| [defineStaticSite](#definestaticsite) | Available |
-| [defineFifoQueue](#definefifoqueue) | Available |
-| [defineSchedule](#defineschedule) | Planned |
-| [defineEvent](#defineevent) | Planned |
-| [defineS3](#defines3) | Planned |
+## Overview
+
+Every resource in Effortless is created with a `define*` function. Each call declares **what** you need — the framework handles the infrastructure.
+
+Some definitions include a Lambda handler (a callback like `onRequest`, `onRecord`, or `onMessage`). Others are **resource-only** — they create AWS resources without any code attached:
+
+| Definition | Creates | Handler required? |
+|---|---|---|
+| [defineHttp](#definehttp) | API Gateway + Lambda | Yes (`onRequest`) |
+| [defineTable](#definetable) | DynamoDB table + optional stream Lambda | No — table-only when no `onRecord`/`onBatch` |
+| [defineApp](#defineapp) | API Gateway + Lambda serving static files | No (built-in file server) |
+| [defineStaticSite](#definestaticsite) | S3 + CloudFront | No (no Lambda at all) |
+| [defineFifoQueue](#definefifoqueue) | SQS FIFO + Lambda | Yes (`onMessage`/`onBatch`) |
+| [defineSchedule](#defineschedule) | EventBridge + Lambda | Yes — Planned |
+| [defineEvent](#defineevent) | EventBridge + Lambda | Yes — Planned |
+| [defineS3](#defines3) | S3 + event notifications | Yes — Planned |
+
+Resource-only definitions are useful when you need the infrastructure but handle it from elsewhere. For example, a `defineTable` without stream callbacks creates a DynamoDB table that other definitions can reference via `deps`:
+
+```typescript
+// Just a table — no Lambda, no stream
+export const users = defineTable({
+  pk: { name: "id", type: "string" },
+  schema: typed<User>(),
+});
+
+// HTTP endpoint that writes to the table
+export const createUser = defineHttp({
+  method: "POST",
+  path: "/users",
+  deps: { users },
+  onRequest: async ({ req, deps }) => {
+    await deps.users.put({ id: "1", name: "Alice" });
+    return { status: 201 };
+  },
+});
+```
 
 ---
 

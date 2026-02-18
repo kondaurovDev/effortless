@@ -1,6 +1,6 @@
 ---
 title: Comparisons
-description: How Effortless compares to CloudFormation, SST, Nitric, Terraform, and other deployment tools.
+description: How Effortless compares to CloudFormation, SST, Nitric, Alchemy, Terraform, and other deployment tools.
 ---
 
 ## Why Not CloudFormation?
@@ -232,6 +232,59 @@ If Ampt shuts down, your app needs rewriting. Effortless deploys standard AWS re
 
 ---
 
+## Why Not Alchemy?
+
+[Alchemy](https://alchemy.run/) is a TypeScript-native IaC library that provisions cloud resources (Cloudflare, AWS, GitHub) via direct HTTPS calls. No YAML, no CloudFormation — just TypeScript.
+
+**But Alchemy is infrastructure-AS-code, not FROM-code:**
+
+```typescript
+// Alchemy — you explicitly declare resources
+const db = await Database("my-db");
+const bucket = await Bucket("assets", {
+  bucketName: `my-bucket-${stage}`
+});
+const worker = await Worker("api", {
+  bindings: { DB: db }
+});
+// You still manage resources manually — Alchemy just makes the language nicer
+```
+
+```typescript
+// Effortless — infrastructure IS the code
+export const orders = defineTable({
+  schema: { id: Schema.String, amount: Schema.Number },
+  primaryKey: "id",
+});
+
+export const api = defineHttp({
+  method: "GET", path: "/orders",
+  deps: { orders },  // ← auto IAM, typed client
+  onRequest: async ({ deps }) => {
+    const items = await deps.orders.query(/* fully typed */);
+    return { status: 200, body: items };
+  }
+});
+// No resource declarations — Lambda, IAM, API Gateway all inferred
+```
+
+| | Alchemy | Effortless |
+|---|---|---|
+| Approach | Infrastructure-as-code (TS instead of YAML) | Infrastructure-from-code (inferred from handlers) |
+| Abstraction level | Medium — explicit resource declarations | High — `define*` → everything |
+| Typed runtime clients | No — provisioning only | Yes — `TableClient<T>`, auto IAM |
+| State management | Local state files (like Terraform) | No state files — AWS tags |
+| Multi-cloud | Yes (Cloudflare, AWS, GitHub) | No — AWS only |
+| Runtime wrappers | No — you write Lambda handlers yourself | Yes — wrappers, DI, context caching |
+| Deployment engine | Direct HTTPS to cloud APIs | Direct AWS SDK calls |
+| AI-first | Yes — generate resources via LLMs | No — but resources are inferred, so nothing to generate |
+
+Alchemy competes with Pulumi and CDK — it makes IaC nicer by replacing YAML with TypeScript. Effortless eliminates IaC entirely: you write handlers, infrastructure follows.
+
+Alchemy is a good fit if you need multi-cloud provisioning in TypeScript. Effortless is for teams on AWS who don't want to write infrastructure code at all.
+
+---
+
 ## Why Not Serverless Framework?
 
 Serverless Framework v3+ builds on CloudFormation:
@@ -248,18 +301,18 @@ Effortless bypasses all of this with direct SDK calls and zero config files.
 
 ## Comparison Summary
 
-| Aspect | SST v3 | Nitric | Ampt | Effortless |
-|--------|--------|--------|------|------------|
-| Infra from code (not config) | No | Yes | Yes | **Yes** |
-| Typed client from `define*` | No | No | No | **Yes** |
-| Schema → validation + types | No | No | No | **Yes** |
-| Auto IAM wiring | Yes (linking) | Yes | Yes | **Yes** |
-| No state files | No | No | N/A | **Yes** |
-| Runs in your AWS account | Yes | Yes | No | **Yes** |
-| Dashboard / Console | Yes | Yes | Yes | Planned |
-| Multi-cloud | Partial | Yes | No | No |
-| Deploy speed | ~30s | ~30s | <1s | ~5-10s |
-| Open source | Yes | Yes | No | **Yes** |
+| Aspect | SST v3 | Nitric | Alchemy | Ampt | Effortless |
+|--------|--------|--------|---------|------|------------|
+| Infra from code (not config) | No | Yes | No | Yes | **Yes** |
+| Typed client from `define*` | No | No | No | No | **Yes** |
+| Schema → validation + types | No | No | No | No | **Yes** |
+| Auto IAM wiring | Yes (linking) | Yes | No | Yes | **Yes** |
+| No state files | No | No | No | N/A | **Yes** |
+| Runs in your AWS account | Yes | Yes | Yes | No | **Yes** |
+| Dashboard / Console | Yes | Yes | No | Yes | Planned |
+| Multi-cloud | Partial | Yes | Yes | No | No |
+| Deploy speed | ~30s | ~30s | Fast | <1s | ~5-10s |
+| Open source | Yes | Yes | Yes | No | **Yes** |
 
 **What only effortless does**: one `define*` call creates the AWS resource, generates a typed runtime client, wires IAM permissions, and validates data with the schema — all from a single TypeScript export. No config files, no state files, no separate infrastructure definitions.
 

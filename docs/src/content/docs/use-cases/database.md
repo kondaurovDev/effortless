@@ -177,5 +177,5 @@ export const cache = defineTable({
 
 ## See also
 
-- [Handlers reference — defineTable](/handlers/#definetable) — all configuration options
+- [Definitions reference — defineTable](/definitions/#definetable) — all configuration options
 - [HTTP API use case](/use-cases/http-api/) — how to use deps in HTTP handlers

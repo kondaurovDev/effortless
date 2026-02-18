@@ -147,5 +147,5 @@ Behind the scenes, CloudFront returns `index.html` for any path that doesn't mat
 
 ## See also
 
-- [Handlers reference — defineApp](/handlers/#defineapp) — all configuration options
-- [Handlers reference — defineStaticSite](/handlers/#definestaticsite) — all configuration options
+- [Definitions reference — defineApp](/definitions/#defineapp) — all configuration options
+- [Definitions reference — defineStaticSite](/definitions/#definestaticsite) — all configuration options

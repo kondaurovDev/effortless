@@ -184,6 +184,6 @@ The `visibilityTimeout` is automatically set to at least your Lambda timeout —
 
 ## See also
 
-- [Handlers reference — defineFifoQueue](/handlers/#definefifoqueue) — all configuration options
+- [Definitions reference — defineFifoQueue](/definitions/#definefifoqueue) — all configuration options
 - [Database guide](/use-cases/database/) — how to define tables and use them as deps
 - [HTTP API guide](/use-cases/http-api/) — how to use deps and params in HTTP handlers

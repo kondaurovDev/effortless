@@ -270,6 +270,6 @@ No manual SSM calls. No `GetParameter` permission writing. No environment variab
 ## Next steps
 
 - [Installation](/installation/) — install and deploy your first handler in 2 minutes
-- [Handlers](/handlers/) — all handler types and their options
+- [Definitions](/definitions/) — all definition types and their options
 - [Architecture](/architecture/) — how static analysis, bundling, and deployment work
 - [Comparisons](/comparisons/) — detailed comparisons with SST, Nitric, Serverless Framework, and others
