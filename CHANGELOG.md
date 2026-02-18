@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.8.1
+
+### Patch Changes
+
+- [`c7574a8`](https://github.com/kondaurovDev/effortless-aws/commit/c7574a85cb63a3cae0105ca014196ac6550cfeb8) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Add `eff config` CLI command for managing SSM parameters and deploy-time warning for missing parameters
+
 ## 0.8.0
 
 ### Minor Changes
