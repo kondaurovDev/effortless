@@ -26,6 +26,10 @@ export type { EnsureBucketInput, SyncFilesInput, SyncFilesResult } from "./s3";
 export { ensureOAC, ensureUrlRewriteFunction, ensureDistribution, invalidateDistribution, disableAndDeleteDistribution, deleteOAC } from "./cloudfront";
 export type { EnsureOACInput, EnsureDistributionInput, DistributionResult } from "./cloudfront";
 
+// API Gateway WebSocket
+export { ensureWebSocketApi, addWebSocketRoutes, deleteWebSocketApi } from "./apigateway-ws";
+export type { WebSocketApiConfig, WebSocketApiResult, WebSocketRoutesConfig } from "./apigateway-ws";
+
 // SQS
 export { ensureFifoQueue, ensureSqsEventSourceMapping, deleteFifoQueue } from "./sqs";
 export type { EnsureFifoQueueInput, EnsureFifoQueueResult, EnsureSqsEventSourceMappingInput } from "./sqs";

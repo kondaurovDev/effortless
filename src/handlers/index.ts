@@ -38,6 +38,18 @@ export type {
   DefineFifoQueueOptions
 } from "./define-fifo-queue";
 
+// WebSocket handlers
+export { defineWebSocket } from "./define-websocket";
+export type {
+  WebSocketConfig,
+  WebSocketHandler,
+  WebSocketSendFn,
+  WebSocketConnectFn,
+  WebSocketMessageFn,
+  WebSocketDisconnectFn,
+  DefineWebSocketOptions
+} from "./define-websocket";
+
 // Table client
 export type { TableClient, QueryParams } from "../runtime/table-client";
 

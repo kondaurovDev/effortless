@@ -37,6 +37,7 @@ import { deployTableFunction } from "./deploy-table";
 import { deployAppLambda } from "./deploy-app";
 import { deployStaticSite, type DeployStaticSiteResult } from "./deploy-static-site";
 import { deployFifoQueueFunction, type DeployFifoQueueResult } from "./deploy-fifo-queue";
+import { deployWebSocketFunction, type DeployWebSocketResult } from "./deploy-websocket";
 
 // ============ Progress tracking ============
 
@@ -449,6 +450,34 @@ const buildFifoQueueTasks = (
   return tasks;
 };
 
+const buildWebSocketTasks = (
+  ctx: DeployTaskCtx,
+  handlers: DiscoveredHandlers["webSocketHandlers"],
+  results: DeployWebSocketResult[],
+): Effect.Effect<void, unknown>[] => {
+  const tasks: Effect.Effect<void, unknown>[] = [];
+  const { region } = ctx.input;
+  for (const { file, exports } of handlers) {
+    for (const fn of exports) {
+      tasks.push(
+        Effect.gen(function* () {
+          const env = resolveHandlerEnv(fn.depsKeys, fn.paramEntries, ctx);
+          const result = yield* deployWebSocketFunction({
+            input: makeDeployInput(ctx, file), fn,
+            ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
+            ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
+            depsEnv: env.depsEnv, depsPermissions: env.depsPermissions,
+            ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
+          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region }, apigatewayv2: { region } })));
+          results.push(result);
+          yield* ctx.logComplete(fn.config.name ?? fn.exportName, "ws", result.status);
+        })
+      );
+    }
+  }
+  return tasks;
+};
+
 // ============ Project deployment ============
 
 export type DeployProjectInput = {
@@ -467,6 +496,7 @@ export type DeployProjectResult = {
   appResults: DeployResult[];
   staticSiteResults: DeployStaticSiteResult[];
   fifoQueueResults: DeployFifoQueueResult[];
+  webSocketResults: DeployWebSocketResult[];
 };
 
 export const deployProject = (input: DeployProjectInput) =>
@@ -480,14 +510,15 @@ export const deployProject = (input: DeployProjectInput) =>
 
     yield* Effect.logDebug(`Found ${files.length} file(s) matching patterns`);
 
-    const { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers } = discoverHandlers(files);
+    const { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, webSocketHandlers } = discoverHandlers(files);
 
     const totalHttpHandlers = httpHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalTableHandlers = tableHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalAppHandlers = appHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalStaticSiteHandlers = staticSiteHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalFifoQueueHandlers = fifoQueueHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalAllHandlers = totalHttpHandlers + totalTableHandlers + totalAppHandlers + totalStaticSiteHandlers + totalFifoQueueHandlers;
+    const totalWebSocketHandlers = webSocketHandlers.reduce((acc, h) => acc + h.exports.length, 0);
+    const totalAllHandlers = totalHttpHandlers + totalTableHandlers + totalAppHandlers + totalStaticSiteHandlers + totalFifoQueueHandlers + totalWebSocketHandlers;
 
     if (totalAllHandlers === 0) {
       return yield* Effect.fail(new Error("No handlers found in matched files"));
@@ -499,10 +530,11 @@ export const deployProject = (input: DeployProjectInput) =>
     if (totalAppHandlers > 0) parts.push(`${totalAppHandlers} app`);
     if (totalStaticSiteHandlers > 0) parts.push(`${totalStaticSiteHandlers} site`);
     if (totalFifoQueueHandlers > 0) parts.push(`${totalFifoQueueHandlers} queue`);
+    if (totalWebSocketHandlers > 0) parts.push(`${totalWebSocketHandlers} ws`);
     yield* Console.log(`\n  ${c.dim("Handlers:")} ${parts.join(", ")}`);
 
     // Check for missing SSM parameters
-    const discovered = { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers };
+    const discovered = { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, webSocketHandlers };
     const requiredParams = collectRequiredParams(discovered, input.project, resolveStage(input.stage));
     if (requiredParams.length > 0) {
       const { missing } = yield* checkMissingParams(requiredParams).pipe(
@@ -579,6 +611,8 @@ export const deployProject = (input: DeployProjectInput) =>
       for (const fn of exports) manifest.push({ name: fn.config.name ?? fn.exportName, type: "site" });
     for (const { exports } of fifoQueueHandlers)
       for (const fn of exports) manifest.push({ name: fn.config.name ?? fn.exportName, type: "queue" });
+    for (const { exports } of webSocketHandlers)
+      for (const fn of exports) manifest.push({ name: fn.config.name ?? fn.exportName, type: "ws" });
 
     manifest.sort((a, b) => a.name.localeCompare(b.name));
     const logComplete = createLiveProgress(manifest);
@@ -591,6 +625,7 @@ export const deployProject = (input: DeployProjectInput) =>
     const appResults: DeployResult[] = [];
     const staticSiteResults: DeployStaticSiteResult[] = [];
     const fifoQueueResults: DeployFifoQueueResult[] = [];
+    const webSocketResults: DeployWebSocketResult[] = [];
 
     const tasks = [
       ...(apiId ? buildHttpTasks(ctx, httpHandlers, apiId, httpResults) : []),
@@ -598,6 +633,7 @@ export const deployProject = (input: DeployProjectInput) =>
       ...(apiId ? buildAppTasks(ctx, appHandlers, apiId, appResults) : []),
       ...buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults),
       ...buildFifoQueueTasks(ctx, fifoQueueHandlers, fifoQueueResults),
+      ...buildWebSocketTasks(ctx, webSocketHandlers, webSocketResults),
     ];
 
     yield* Effect.all(tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
@@ -632,5 +668,5 @@ export const deployProject = (input: DeployProjectInput) =>
       yield* Effect.logDebug(`Deployment complete! API: ${apiUrl}`);
     }
 
-    return { apiId, apiUrl, httpResults, tableResults, appResults, staticSiteResults, fifoQueueResults };
+    return { apiId, apiUrl, httpResults, tableResults, appResults, staticSiteResults, fifoQueueResults, webSocketResults };
   });

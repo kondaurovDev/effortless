@@ -44,6 +44,7 @@ export const collectRequiredParams = (
   collect(handlers.httpHandlers);
   collect(handlers.tableHandlers);
   collect(handlers.fifoQueueHandlers);
+  collect(handlers.webSocketHandlers);
 
   return Array.from(seen.values());
 };

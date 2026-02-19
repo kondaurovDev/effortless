@@ -8,6 +8,7 @@ export { defineTable } from "./handlers/define-table"
 export { defineApp } from "./handlers/define-app"
 export { defineStaticSite } from "./handlers/define-static-site"
 export { defineFifoQueue } from "./handlers/define-fifo-queue"
+export { defineWebSocket } from "./handlers/define-websocket"
 export { param } from "./helpers"
 export { typed } from "./helpers"
 
@@ -17,6 +18,7 @@ export type { TableConfig, TableRecord, TableHandler, TableKey, KeyType, StreamV
 export type { AppConfig, AppHandler } from "./handlers/define-app"
 export type { StaticSiteConfig, StaticSiteHandler } from "./handlers/define-static-site"
 export type { FifoQueueConfig, FifoQueueMessage, FifoQueueHandler, FifoQueueMessageFn, FifoQueueBatchFn, DefineFifoQueueOptions } from "./handlers/define-fifo-queue"
+export type { WebSocketConfig, WebSocketHandler, WebSocketSendFn, WebSocketConnectFn, WebSocketMessageFn, WebSocketDisconnectFn, DefineWebSocketOptions } from "./handlers/define-websocket"
 export type { TableClient, QueryParams } from "./runtime/table-client"
 export type { ParamRef, ResolveConfig } from "./helpers"
 

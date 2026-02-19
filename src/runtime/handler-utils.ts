@@ -88,7 +88,7 @@ export const readStatic = (filePath: string): string =>
 
 export const createHandlerRuntime = (
   handler: { setup?: (...args: any[]) => any; deps?: any; config?: any; static?: string[] },
-  handlerType: "http" | "table" | "app" | "fifo-queue",
+  handlerType: "http" | "table" | "app" | "fifo-queue" | "websocket",
   logLevel: LogLevel = "info"
 ): HandlerRuntime => {
   const handlerName = process.env.EFF_HANDLER ?? "unknown";
