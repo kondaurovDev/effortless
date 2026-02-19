@@ -11,7 +11,10 @@
     "onlyBuiltDependencies": [
       "esbuild",
       "sharp"
-    ]
+    ],
+    "overrides": {
+      "effortless-aws": "link:.."
+    }
   },
   "devDependencies": {
     "@astrojs/sitemap": "^3.7.0",

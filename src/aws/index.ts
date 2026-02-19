@@ -22,9 +22,13 @@ export type { LayerConfig, LayerResult, LayerStatus, LayerVersionInfo } from "./
 export { ensureBucket, syncFiles, putBucketPolicyForOAC, emptyBucket, deleteBucket } from "./s3";
 export type { EnsureBucketInput, SyncFilesInput, SyncFilesResult } from "./s3";
 
+// ACM
+export { findCertificate } from "./acm";
+export type { FindCertificateResult } from "./acm";
+
 // CloudFront
-export { ensureOAC, ensureUrlRewriteFunction, ensureDistribution, invalidateDistribution, disableAndDeleteDistribution, deleteOAC } from "./cloudfront";
-export type { EnsureOACInput, EnsureDistributionInput, DistributionResult } from "./cloudfront";
+export { ensureOAC, ensureUrlRewriteFunction, ensureViewerRequestFunction, ensureDistribution, invalidateDistribution, disableAndDeleteDistribution, deleteOAC, cleanupOrphanedFunctions } from "./cloudfront";
+export type { EnsureOACInput, EnsureDistributionInput, DistributionResult, ViewerRequestFunctionConfig } from "./cloudfront";
 
 // SQS
 export { ensureFifoQueue, ensureSqsEventSourceMapping, deleteFifoQueue } from "./sqs";

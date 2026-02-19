@@ -117,6 +117,33 @@ On deploy, Effortless:
 
 You get a CloudFront URL like `https://d1234567890.cloudfront.net`. Your site is served from edge locations worldwide.
 
+### Custom domain
+
+Want to serve from `example.com` instead of a CloudFront URL? Add `domain`:
+
+```typescript
+export const site = defineStaticSite({
+  dir: "dist",
+  build: "npm run build",
+  domain: "example.com",
+});
+```
+
+Effortless automatically finds your ACM certificate in us-east-1 and configures SSL. If the certificate also covers `www.example.com`, a 301 redirect from `www` to the non-www domain is set up automatically — no extra config needed.
+
+**What you need to do beforehand:**
+
+1. Create an ACM certificate in **us-east-1** for your domain (include `www` for redirect support)
+2. Validate the certificate via DNS
+3. After first deploy, point your DNS (CNAME or alias) to the CloudFront distribution
+
+**What Effortless does for you:**
+
+- Finds the ACM certificate by domain match (exact or wildcard)
+- Configures CloudFront aliases and SSL (SNI, TLSv1.2)
+- Detects www coverage on the certificate and sets up a CloudFront Function for 301 redirect
+- Cleans up orphaned CloudFront Functions when config changes
+
 ### SPA mode
 
 Same as defineApp — enable `spa: true` and all routes return `index.html`:
@@ -139,6 +166,8 @@ Behind the scenes, CloudFront returns `index.html` for any path that doesn't mat
 |---|---|---|
 | Serves via | Lambda + API Gateway | CloudFront + S3 |
 | Global CDN | No | Yes |
+| Custom domain | No (uses API Gateway URL) | Yes (`domain` option) |
+| www redirect | No | Automatic (when cert covers www) |
 | Same domain as API | Yes | No (separate CloudFront URL) |
 | Extra AWS resources | None | S3 bucket + CloudFront distribution |
 | Best for | Internal tools, admin panels, fullstack apps | Public sites, blogs, docs, marketing pages |

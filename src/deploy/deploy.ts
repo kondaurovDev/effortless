@@ -10,7 +10,8 @@ import {
   type TagContext,
   ensureLayer,
   readProductionDependencies,
-  collectLayerPackages
+  collectLayerPackages,
+  cleanupOrphanedFunctions,
 } from "../aws";
 import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "~/build/bundle";
 import type { ParamEntry } from "~/build/handler-registry";
@@ -411,6 +412,7 @@ const buildStaticSiteTasks = (
           }).pipe(Effect.provide(Aws.makeClients({
             s3: { region }, cloudfront: { region: "us-east-1" },
             resource_groups_tagging_api: { region: "us-east-1" },
+            acm: { region: "us-east-1" },
           })));
           results.push(result);
           yield* ctx.logComplete( fn.config.name ?? fn.exportName, "site", "updated");
@@ -601,6 +603,19 @@ export const deployProject = (input: DeployProjectInput) =>
     ];
 
     yield* Effect.all(tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
+
+    // Clean up orphaned CloudFront Functions (e.g. after rename or config change)
+    if (staticSiteResults.length > 0) {
+      yield* cleanupOrphanedFunctions(input.project, stage).pipe(
+        Effect.provide(Aws.makeClients({
+          cloudfront: { region: "us-east-1" },
+          resource_groups_tagging_api: { region: "us-east-1" },
+        })),
+        Effect.catchAll(error =>
+          Effect.logDebug(`CloudFront Function cleanup failed (non-fatal): ${error}`)
+        )
+      );
+    }
 
     // Remove stale API Gateway routes
     if (apiId) {

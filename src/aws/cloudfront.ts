@@ -38,50 +38,108 @@ export const ensureOAC = (input: EnsureOACInput) =>
     return { oacId: createResult.OriginAccessControl!.Id! };
   });
 
-// CloudFront Function that rewrites /path/ → /path/index.html for static sites
-const URL_REWRITE_FUNCTION_CODE = `\
-function handler(event) {
-  var request = event.request;
-  var uri = request.uri;
-  if (uri.endsWith('/')) {
-    request.uri += 'index.html';
-  } else if (!uri.includes('.')) {
-    request.uri += '/index.html';
-  }
-  return request;
-}`;
+// ============ CloudFront Functions ============
 
-export const ensureUrlRewriteFunction = (name: string) =>
+export type ViewerRequestFunctionConfig = {
+  rewriteUrls: boolean;
+  redirectWwwDomain?: string;
+};
+
+const generateViewerRequestCode = (config: ViewerRequestFunctionConfig): string => {
+  const lines: string[] = [];
+  lines.push("function handler(event) {");
+  lines.push("  var request = event.request;");
+
+  if (config.redirectWwwDomain) {
+    const primaryDomain = config.redirectWwwDomain.replace(/^www\./, "");
+    lines.push("  var host = request.headers.host && request.headers.host.value;");
+    lines.push(`  if (host === '${config.redirectWwwDomain}') {`);
+    lines.push("    return {");
+    lines.push("      statusCode: 301,");
+    lines.push("      statusDescription: 'Moved Permanently',");
+    lines.push(`      headers: { location: { value: 'https://${primaryDomain}' + request.uri } }`);
+    lines.push("    };");
+    lines.push("  }");
+  }
+
+  if (config.rewriteUrls) {
+    lines.push("  var uri = request.uri;");
+    lines.push("  if (uri.endsWith('/')) {");
+    lines.push("    request.uri += 'index.html';");
+    lines.push("  } else if (!uri.includes('.')) {");
+    lines.push("    request.uri += '/index.html';");
+    lines.push("  }");
+  }
+
+  lines.push("  return request;");
+  lines.push("}");
+  return lines.join("\n");
+};
+
+const buildFunctionComment = (config: ViewerRequestFunctionConfig): string => {
+  const parts: string[] = [];
+  if (config.rewriteUrls) parts.push("URL rewrite");
+  if (config.redirectWwwDomain) parts.push("www redirect");
+  return `effortless: ${parts.join(" + ") || "viewer request"}`;
+};
+
+export const ensureViewerRequestFunction = (name: string, config: ViewerRequestFunctionConfig) =>
   Effect.gen(function* () {
-    // Check if function already exists
+    const functionCode = generateViewerRequestCode(config);
+    const encodedCode = new TextEncoder().encode(functionCode);
+    const comment = buildFunctionComment(config);
+
     const list = yield* cloudfront.make("list_functions", {});
     const existing = list.FunctionList?.Items?.find(f => f.Name === name);
 
     if (existing) {
-      yield* Effect.logDebug(`CloudFront Function ${name} already exists`);
+      // Check if code has changed by comparing with the live version
+      const getResult = yield* cloudfront.make("get_function", {
+        Name: name,
+        Stage: "LIVE",
+      });
+      const currentCode = getResult.FunctionCode
+        ? new TextDecoder().decode(getResult.FunctionCode)
+        : "";
+
+      if (currentCode === functionCode) {
+        yield* Effect.logDebug(`CloudFront Function ${name} is up to date, skipping update`);
+        return { functionArn: existing.FunctionMetadata!.FunctionARN! };
+      }
+
+      yield* Effect.logDebug(`CloudFront Function ${name} code changed, updating...`);
+      const updateResult = yield* cloudfront.make("update_function", {
+        Name: name,
+        IfMatch: getResult.ETag!,
+        FunctionConfig: { Comment: comment, Runtime: "cloudfront-js-2.0" },
+        FunctionCode: encodedCode,
+      });
+
+      yield* cloudfront.make("publish_function", {
+        Name: name,
+        IfMatch: updateResult.ETag!,
+      });
+
       return { functionArn: existing.FunctionMetadata!.FunctionARN! };
     }
 
     yield* Effect.logDebug(`Creating CloudFront Function: ${name}`);
     const result = yield* cloudfront.make("create_function", {
       Name: name,
-      FunctionConfig: {
-        Comment: "URL rewrite: append index.html for directory paths",
-        Runtime: "cloudfront-js-2.0",
-      },
-      FunctionCode: new TextEncoder().encode(URL_REWRITE_FUNCTION_CODE),
+      FunctionConfig: { Comment: comment, Runtime: "cloudfront-js-2.0" },
+      FunctionCode: encodedCode,
     });
 
-    const etag = result.ETag!;
-
-    // Publish the function to make it available for association
     yield* cloudfront.make("publish_function", {
       Name: name,
-      IfMatch: etag,
+      IfMatch: result.ETag!,
     });
 
     return { functionArn: result.FunctionSummary!.FunctionMetadata!.FunctionARN! };
   });
+
+export const ensureUrlRewriteFunction = (name: string) =>
+  ensureViewerRequestFunction(name, { rewriteUrls: true });
 
 export type EnsureDistributionInput = {
   project: string;
@@ -94,6 +152,8 @@ export type EnsureDistributionInput = {
   index: string;
   tags: Record<string, string>;
   urlRewriteFunctionArn?: string;
+  aliases?: string[];
+  acmCertificateArn?: string;
 };
 
 export type DistributionResult = {
@@ -107,7 +167,17 @@ const makeDistComment = (project: string, stage: string, handlerName: string) =>
 
 export const ensureDistribution = (input: EnsureDistributionInput) =>
   Effect.gen(function* () {
-    const { project, stage, handlerName, bucketName, bucketRegion, oacId, spa, index, tags, urlRewriteFunctionArn } = input;
+    const { project, stage, handlerName, bucketName, bucketRegion, oacId, spa, index, tags, urlRewriteFunctionArn, aliases, acmCertificateArn } = input;
+    const aliasesConfig = aliases && aliases.length > 0
+      ? { Quantity: aliases.length, Items: aliases }
+      : { Quantity: 0, Items: [] as string[] };
+    const viewerCertificate = acmCertificateArn
+      ? {
+          ACMCertificateArn: acmCertificateArn,
+          SSLSupportMethod: "sni-only" as const,
+          MinimumProtocolVersion: "TLSv1.2_2021" as const,
+        }
+      : undefined;
     const functionAssociations = urlRewriteFunctionArn
       ? { Quantity: 1, Items: [{ FunctionARN: urlRewriteFunctionArn, EventType: "viewer-request" as const }] }
       : { Quantity: 0, Items: [] };
@@ -150,13 +220,23 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
 
       // Check if distribution config needs updating
       const currentOrigin = currentConfig.Origins?.Items?.[0];
+      const currentAliases = currentConfig.Aliases?.Items ?? [];
+      const desiredAliases = aliases ?? [];
+      const aliasesMatch =
+        currentAliases.length === desiredAliases.length &&
+        desiredAliases.every(a => currentAliases.includes(a));
+      const certMatch = currentConfig.ViewerCertificate?.ACMCertificateArn === (acmCertificateArn ?? undefined);
+
       const needsUpdate =
         currentOrigin?.DomainName !== originDomain ||
         currentOrigin?.OriginAccessControlId !== oacId ||
         currentConfig.DefaultRootObject !== index ||
         currentConfig.DefaultCacheBehavior?.CachePolicyId !== CACHING_OPTIMIZED_POLICY_ID ||
         (currentConfig.CustomErrorResponses?.Quantity ?? 0) !== customErrorResponses.Quantity ||
-        (currentConfig.DefaultCacheBehavior?.FunctionAssociations?.Quantity ?? 0) !== functionAssociations.Quantity;
+        (currentConfig.DefaultCacheBehavior?.FunctionAssociations?.Quantity ?? 0) !== functionAssociations.Quantity ||
+        currentConfig.DefaultCacheBehavior?.FunctionAssociations?.Items?.[0]?.FunctionARN !== (urlRewriteFunctionArn ?? undefined) ||
+        !aliasesMatch ||
+        !certMatch;
 
       if (needsUpdate) {
         yield* Effect.logDebug(`CloudFront distribution ${existing.Id} config changed, updating...`);
@@ -174,6 +254,7 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
                 {
                   Id: originId,
                   DomainName: originDomain,
+                  OriginPath: "",
                   OriginAccessControlId: oacId,
                   S3OriginConfig: { OriginAccessIdentity: "" },
                   CustomHeaders: { Quantity: 0, Items: [] },
@@ -194,6 +275,8 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
               FunctionAssociations: functionAssociations,
               ForwardedValues: undefined,
             },
+            Aliases: aliasesConfig,
+            ...(viewerCertificate ? { ViewerCertificate: viewerCertificate } : {}),
             DefaultRootObject: index,
             CustomErrorResponses: customErrorResponses,
             Enabled: true,
@@ -246,6 +329,8 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
             CachePolicyId: CACHING_OPTIMIZED_POLICY_ID,
             FunctionAssociations: functionAssociations,
           },
+          Aliases: aliasesConfig,
+          ...(viewerCertificate ? { ViewerCertificate: viewerCertificate } : {}),
           DefaultRootObject: index,
           Enabled: true,
           CustomErrorResponses: customErrorResponses,
@@ -397,4 +482,61 @@ export const deleteOAC = (oacId: string) =>
         (e) => Effect.logDebug(`Could not delete OAC ${oacId}: ${e.cause.message}`)
       )
     );
+  });
+
+/**
+ * Find and delete CloudFront Functions that match the project/stage naming
+ * convention but are not associated with any distribution in the project.
+ */
+export const cleanupOrphanedFunctions = (project: string, stage: string) =>
+  Effect.gen(function* () {
+    const prefix = `${project}-${stage}-`;
+
+    // List all CloudFront Functions matching our naming pattern
+    const list = yield* cloudfront.make("list_functions", {});
+    const ourFunctions = (list.FunctionList?.Items ?? []).filter(
+      f => f.Name?.startsWith(prefix)
+    );
+
+    if (ourFunctions.length === 0) return;
+
+    // Get all distributions for this project/stage
+    const resources = yield* getResourcesByTags(project, stage);
+    const distIds = resources
+      .filter(r => r.ResourceARN?.includes(":distribution/"))
+      .map(r => r.ResourceARN!.split("/").pop()!)
+      .filter(Boolean);
+
+    // Collect all function ARNs actively used by our distributions
+    const activeFunctionArns = new Set<string>();
+    for (const distId of distIds) {
+      const config = yield* cloudfront.make("get_distribution_config", { Id: distId });
+      const associations = config.DistributionConfig?.DefaultCacheBehavior?.FunctionAssociations?.Items ?? [];
+      for (const assoc of associations) {
+        if (assoc.FunctionARN) activeFunctionArns.add(assoc.FunctionARN);
+      }
+    }
+
+    // Delete functions not referenced by any distribution
+    for (const fn of ourFunctions) {
+      const arn = fn.FunctionMetadata?.FunctionARN;
+      if (arn && !activeFunctionArns.has(arn)) {
+        yield* Effect.logDebug(`Deleting orphaned CloudFront Function: ${fn.Name}`);
+        yield* cloudfront.make("describe_function", {
+          Name: fn.Name!,
+          Stage: "LIVE",
+        }).pipe(
+          Effect.flatMap(desc =>
+            cloudfront.make("delete_function", {
+              Name: fn.Name!,
+              IfMatch: desc.ETag!,
+            })
+          ),
+          Effect.catchIf(
+            e => e._tag === "CloudFrontError",
+            (e) => Effect.logDebug(`Could not delete function ${fn.Name}: ${e.cause.message}`)
+          )
+        );
+      }
+    }
   });

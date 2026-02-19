@@ -492,7 +492,7 @@ For CDN-backed sites (S3 + CloudFront), use [defineStaticSite](#definestaticsite
 
 ## defineStaticSite
 
-Creates: S3 bucket + CloudFront distribution + Origin Access Control.
+Creates: S3 bucket + CloudFront distribution + Origin Access Control + CloudFront Function (viewer request).
 
 ```typescript
 export const docs = defineStaticSite({
@@ -504,6 +504,7 @@ export const docs = defineStaticSite({
   index?: string,                    // default: "index.html"
   spa?: boolean,                     // SPA mode: serve index for all paths (default: false)
   build?: string,                    // shell command to run before deploy
+  domain?: string,                   // custom domain (e.g. "example.com")
 });
 ```
 
@@ -526,11 +527,39 @@ export const dashboard = defineStaticSite({
 });
 ```
 
+### Custom domain
+
+Set `domain` to serve your site on a custom domain instead of the default `*.cloudfront.net` URL:
+
+```typescript
+export const site = defineStaticSite({
+  dir: "dist",
+  build: "npm run build",
+  domain: "example.com",
+});
+```
+
+When `domain` is set, Effortless:
+1. Finds an existing ACM certificate in **us-east-1** that covers your domain
+2. Configures the CloudFront distribution with your domain as an alias and the SSL certificate
+3. If the certificate also covers `www.example.com` (exact or wildcard `*.example.com`) — automatically adds `www` as a second alias and sets up a **301 redirect** from `www.example.com` → `example.com` via a CloudFront Function
+4. If the certificate does **not** cover `www` — deploys without `www` and prints a warning
+
+:::note[Prerequisites]
+Before using `domain`, create an ACM certificate in the **us-east-1** region that covers your domain. For automatic www→non-www redirect, include `www.example.com` (or `*.example.com`) in the certificate. Then point your DNS to the CloudFront distribution domain name (CNAME or alias record).
+:::
+
+:::tip[SEO: www redirect]
+Having both `example.com` and `www.example.com` serve the same content creates duplicate content issues for search engines. Effortless handles this automatically — when your ACM certificate covers `www`, a 301 redirect is set up so search engines index only the non-www version.
+:::
+
 **Built-in best practices**:
 - **URL rewriting** — automatically resolves `/path/` to `/path/index.html` via CloudFront Function.
 - **SPA support** — when `spa: true`, 403/404 errors return `index.html` for client-side routing.
 - **Global distribution** — served via CloudFront edge locations worldwide.
-- **Auto-infrastructure** — S3 bucket, CloudFront distribution, Origin Access Control, and cache invalidation on deploy.
+- **Custom domains** — set `domain` for a custom domain with automatic ACM certificate lookup and optional www→non-www redirect.
+- **Orphan cleanup** — when CloudFront Functions become unused (e.g. after config changes), they are automatically deleted on the next deploy.
+- **Auto-infrastructure** — S3 bucket, CloudFront distribution, Origin Access Control, CloudFront Function, cache invalidation, and SSL certificate configuration on deploy.
 
 ---
 

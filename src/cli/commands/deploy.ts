@@ -41,6 +41,7 @@ export const deployCommand = Command.make(
         resource_groups_tagging_api: { region: finalRegion },
         s3: { region: finalRegion },
         cloudfront: { region: "us-east-1" },
+        acm: { region: "us-east-1" },
       });
 
       const logLevel = verbose ? LogLevel.Debug : LogLevel.Warning;

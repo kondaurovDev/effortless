@@ -12,6 +12,8 @@ export type StaticSiteConfig = {
   spa?: boolean;
   /** Shell command to run before deploy to generate site content (e.g., "npx astro build") */
   build?: string;
+  /** Custom domain name (e.g., "effortless-aws.website"). Requires an ACM certificate in us-east-1. If the cert also covers www, a 301 redirect from www to non-www is set up automatically. */
+  domain?: string;
 };
 
 /**

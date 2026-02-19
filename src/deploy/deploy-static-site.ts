@@ -10,9 +10,10 @@ import {
   syncFiles,
   putBucketPolicyForOAC,
   ensureOAC,
-  ensureUrlRewriteFunction,
+  ensureViewerRequestFunction,
   ensureDistribution,
   invalidateDistribution,
+  findCertificate,
 } from "../aws";
 
 // ============ Static site deployment ============
@@ -64,12 +65,47 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     const oacName = `${project}-${stage}-oac`;
     const { oacId } = yield* ensureOAC({ name: oacName });
 
-    // 4. Ensure URL rewrite function (for static sites, not SPA)
+    // 3b. If domain is set, look up ACM certificate
+    const domain = config.domain;
+    let aliases: string[] | undefined;
+    let acmCertificateArn: string | undefined;
+    let wwwDomain: string | undefined;
+
+    if (domain) {
+      const certResult = yield* findCertificate(domain);
+      acmCertificateArn = certResult.certificateArn;
+
+      const wwwCandidate = `www.${domain}`;
+      const certCoversWww = certResult.coveredDomains.includes(wwwCandidate) ||
+        certResult.coveredDomains.includes(`*.${domain}`);
+
+      if (certCoversWww) {
+        aliases = [domain, wwwCandidate];
+        wwwDomain = wwwCandidate;
+        yield* Effect.logDebug(`ACM certificate covers ${wwwCandidate}, enabling www → non-www redirect`);
+      } else {
+        aliases = [domain];
+        yield* Effect.logWarning(
+          `ACM certificate does not cover ${wwwCandidate}. ` +
+          `For SEO, add ${wwwCandidate} to your ACM certificate in us-east-1 to enable www → non-www redirect.`
+        );
+      }
+    }
+
+    // 4. Ensure viewer request function (URL rewrite + optional www redirect)
     const isSpa = config.spa ?? false;
+    const needsUrlRewrite = !isSpa;
+    const needsWwwRedirect = !!wwwDomain;
     let urlRewriteFunctionArn: string | undefined;
-    if (!isSpa) {
-      const fnName = `${project}-${stage}-url-rewrite`;
-      const result = yield* ensureUrlRewriteFunction(fnName);
+
+    if (needsUrlRewrite || needsWwwRedirect) {
+      const fnName = needsWwwRedirect
+        ? `${project}-${stage}-${handlerName}-viewer-req`
+        : `${project}-${stage}-url-rewrite`;
+      const result = yield* ensureViewerRequestFunction(fnName, {
+        rewriteUrls: needsUrlRewrite,
+        redirectWwwDomain: wwwDomain,
+      });
       urlRewriteFunctionArn = result.functionArn;
     }
 
@@ -86,6 +122,8 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
       index,
       tags: makeTags(tagCtx, "cloudfront-distribution"),
       urlRewriteFunctionArn,
+      aliases,
+      acmCertificateArn,
     });
 
     // 6. Set bucket policy for CloudFront OAC
@@ -98,7 +136,7 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     // 8. Invalidate CloudFront cache
     yield* invalidateDistribution(distributionId);
 
-    const url = `https://${domainName}`;
+    const url = domain ? `https://${domain}` : `https://${domainName}`;
     yield* Effect.logDebug(`Static site deployed: ${url}`);
 
     return {
