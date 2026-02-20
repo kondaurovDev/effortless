@@ -1,13 +1,6 @@
-import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "../helpers";
+import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "./handler-options";
 import type { TableClient } from "../runtime/table-client";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyTableHandler = TableHandler<any, any, any, any, any, any>;
-
-/** Maps a deps declaration to resolved runtime client types */
-type ResolveDeps<D> = {
-  [K in keyof D]: D[K] extends TableHandler<infer T, any, any, any, any> ? TableClient<T> : never;
-};
+import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 
 /** DynamoDB attribute types for keys */
 export type KeyType = "string" | "number" | "binary";
@@ -187,7 +180,7 @@ export type DefineTableOptions<
   T = Record<string, unknown>,
   C = undefined,
   R = void,
-  D extends Record<string, AnyTableHandler> | undefined = undefined,
+  D extends Record<string, AnyDepHandler> | undefined = undefined,
   P extends Record<string, AnyParamRef> | undefined = undefined,
   S extends string[] | undefined = undefined
 > =
@@ -249,7 +242,7 @@ export const defineTable = <
   T = Record<string, unknown>,
   C = undefined,
   R = void,
-  D extends Record<string, AnyTableHandler> | undefined = undefined,
+  D extends Record<string, AnyDepHandler> | undefined = undefined,
   P extends Record<string, AnyParamRef> | undefined = undefined,
   S extends string[] | undefined = undefined
 >(

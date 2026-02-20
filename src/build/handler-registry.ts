@@ -189,6 +189,12 @@ export const handlerRegistry = {
     wrapperFn: "wrapFifoQueue",
     wrapperPath: "~/runtime/wrap-fifo-queue",
   },
+  mailer: {
+    defineFn: "defineMailer",
+    handlerProps: [],
+    wrapperFn: "",
+    wrapperPath: "",
+  },
 } as const;
 
 export type HandlerType = keyof typeof handlerRegistry;

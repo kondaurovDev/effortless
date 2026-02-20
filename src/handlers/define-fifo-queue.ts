@@ -1,14 +1,5 @@
-import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "../helpers";
-import type { TableHandler } from "./define-table";
-import type { TableClient } from "~/runtime/table-client";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyTableHandler = TableHandler<any, any, any, any, any, any>;
-
-/** Maps a deps declaration to resolved runtime client types */
-type ResolveDeps<D> = {
-  [K in keyof D]: D[K] extends TableHandler<infer T, any, any, any, any> ? TableClient<T> : never;
-};
+import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "./handler-options";
+import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 
 /**
  * Parsed SQS FIFO message passed to the handler callbacks.
@@ -140,7 +131,7 @@ type DefineFifoQueueWithOnBatch<T = unknown, C = undefined, D = undefined, P = u
 export type DefineFifoQueueOptions<
   T = unknown,
   C = undefined,
-  D extends Record<string, AnyTableHandler> | undefined = undefined,
+  D extends Record<string, AnyDepHandler> | undefined = undefined,
   P extends Record<string, AnyParamRef> | undefined = undefined,
   S extends string[] | undefined = undefined
 > =
@@ -198,7 +189,7 @@ export type FifoQueueHandler<T = unknown, C = undefined, D = undefined, P = unde
 export const defineFifoQueue = <
   T = unknown,
   C = undefined,
-  D extends Record<string, AnyTableHandler> | undefined = undefined,
+  D extends Record<string, AnyDepHandler> | undefined = undefined,
   P extends Record<string, AnyParamRef> | undefined = undefined,
   S extends string[] | undefined = undefined
 >(

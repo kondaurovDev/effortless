@@ -153,7 +153,7 @@ describe("deps runtime injection", () => {
       const wrapped = wrapHttp(handler);
 
       await expect(wrapped(makeHttpEvent())).rejects.toThrow(
-        'Missing environment variable EFF_TABLE_orders for dep "orders"'
+        'Missing environment variable for dep "orders"'
       );
     });
 

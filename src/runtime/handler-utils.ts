@@ -1,12 +1,14 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-import type { AnyParamRef, LogLevel } from "~/helpers";
+import type { AnyParamRef, LogLevel } from "~/handlers/handler-options";
 import { createTableClient } from "./table-client";
+import { createEmailClient } from "./email-client";
 import { getParameters } from "./ssm-client";
 
 export type { LogLevel };
 
 export const ENV_TABLE_PREFIX = "EFF_TABLE_";
+export const ENV_MAILER_PREFIX = "EFF_MAILER_";
 export const ENV_PARAM_PREFIX = "EFF_PARAM_";
 
 const LOG_RANK: Record<LogLevel, number> = { error: 0, info: 1, debug: 2 };
@@ -27,10 +29,16 @@ export const buildDeps = (deps: Record<string, unknown> | undefined): Record<str
   const result: Record<string, unknown> = {};
   for (const key of Object.keys(deps)) {
     const tableName = process.env[`${ENV_TABLE_PREFIX}${key}`];
-    if (!tableName) {
-      throw new Error(`Missing environment variable ${ENV_TABLE_PREFIX}${key} for dep "${key}"`);
+    if (tableName) {
+      result[key] = createTableClient(tableName);
+      continue;
     }
-    result[key] = createTableClient(tableName);
+    const mailerDomain = process.env[`${ENV_MAILER_PREFIX}${key}`];
+    if (mailerDomain) {
+      result[key] = createEmailClient();
+      continue;
+    }
+    throw new Error(`Missing environment variable for dep "${key}" (checked ${ENV_TABLE_PREFIX}${key}, ${ENV_MAILER_PREFIX}${key})`);
   }
   return result;
 };

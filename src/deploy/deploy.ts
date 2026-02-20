@@ -38,6 +38,7 @@ import { deployTableFunction } from "./deploy-table";
 import { deployAppLambda } from "./deploy-app";
 import { deployStaticSite, type DeployStaticSiteResult } from "./deploy-static-site";
 import { deployFifoQueueFunction, type DeployFifoQueueResult } from "./deploy-fifo-queue";
+import { deployMailer, type DeployMailerResult } from "./deploy-mailer";
 
 // ============ Progress tracking ============
 
@@ -174,6 +175,26 @@ const TABLE_CLIENT_PERMISSIONS = [
   "dynamodb:BatchWriteItem",
 ] as const;
 
+const SES_PERMISSIONS = [
+  "ses:SendEmail",
+  "ses:SendRawEmail",
+] as const;
+
+/**
+ * Build a map of all mailer handler export names to their domains.
+ */
+const buildMailerDomainMap = (
+  mailerHandlers: DiscoveredHandlers["mailerHandlers"],
+): Map<string, string> => {
+  const map = new Map<string, string>();
+  for (const { exports } of mailerHandlers) {
+    for (const fn of exports) {
+      map.set(fn.exportName, fn.config.domain);
+    }
+  }
+  return map;
+};
+
 /**
  * Build a map of all table handler export names to their resolved DynamoDB table names.
  * Table names are deterministic: ${project}-${stage}-${handlerName}
@@ -195,24 +216,40 @@ const buildTableNameMap = (
 
 /**
  * Resolve deps keys to environment variables and IAM permissions.
+ * Supports both table deps (EFF_TABLE_*) and mailer deps (EFF_MAILER_*).
  */
 const resolveDeps = (
   depsKeys: string[],
-  tableNameMap: Map<string, string>
+  tableNameMap: Map<string, string>,
+  mailerDomainMap: Map<string, string>,
 ): { depsEnv: Record<string, string>; depsPermissions: readonly string[] } | undefined => {
   if (depsKeys.length === 0) return undefined;
 
   const depsEnv: Record<string, string> = {};
+  const permissions: string[] = [];
+  let hasTable = false;
+  let hasMailer = false;
+
   for (const key of depsKeys) {
     const tableName = tableNameMap.get(key);
     if (tableName) {
       depsEnv[`EFF_TABLE_${key}`] = tableName;
+      hasTable = true;
+      continue;
+    }
+    const mailerDomain = mailerDomainMap.get(key);
+    if (mailerDomain) {
+      depsEnv[`EFF_MAILER_${key}`] = mailerDomain;
+      hasMailer = true;
     }
   }
 
   if (Object.keys(depsEnv).length === 0) return undefined;
 
-  return { depsEnv, depsPermissions: TABLE_CLIENT_PERMISSIONS };
+  if (hasTable) permissions.push(...TABLE_CLIENT_PERMISSIONS);
+  if (hasMailer) permissions.push(...SES_PERMISSIONS);
+
+  return { depsEnv, depsPermissions: permissions };
 };
 
 // ============ Params resolution ============
@@ -266,6 +303,7 @@ type DeployTaskCtx = {
   external: string[];
   stage: string;
   tableNameMap: Map<string, string>;
+  mailerDomainMap: Map<string, string>;
   logComplete: (name: string, type: string, status: StepStatus) => Effect.Effect<void>;
 };
 
@@ -283,7 +321,7 @@ const resolveHandlerEnv = (
   ctx: DeployTaskCtx,
 ) => {
   const resolved = mergeResolved(
-    resolveDeps(depsKeys, ctx.tableNameMap),
+    resolveDeps(depsKeys, ctx.tableNameMap, ctx.mailerDomainMap),
     resolveParams(paramEntries, ctx.input.project, ctx.stage)
   );
   return {
@@ -451,6 +489,32 @@ const buildFifoQueueTasks = (
   return tasks;
 };
 
+const buildMailerTasks = (
+  ctx: DeployTaskCtx,
+  handlers: DiscoveredHandlers["mailerHandlers"],
+  results: DeployMailerResult[],
+): Effect.Effect<void, unknown>[] => {
+  const tasks: Effect.Effect<void, unknown>[] = [];
+  const { region } = ctx.input;
+  for (const { exports } of handlers) {
+    for (const fn of exports) {
+      tasks.push(
+        Effect.gen(function* () {
+          const result = yield* deployMailer({
+            project: ctx.input.project,
+            stage: ctx.input.stage,
+            region,
+            fn,
+          }).pipe(Effect.provide(Aws.makeClients({ sesv2: { region } })));
+          results.push(result);
+          yield* ctx.logComplete(fn.exportName, "mailer", result.verified ? "unchanged" : "created");
+        })
+      );
+    }
+  }
+  return tasks;
+};
+
 // ============ Project deployment ============
 
 export type DeployProjectInput = {
@@ -469,6 +533,7 @@ export type DeployProjectResult = {
   appResults: DeployResult[];
   staticSiteResults: DeployStaticSiteResult[];
   fifoQueueResults: DeployFifoQueueResult[];
+  mailerResults: DeployMailerResult[];
 };
 
 export const deployProject = (input: DeployProjectInput) =>
@@ -482,14 +547,15 @@ export const deployProject = (input: DeployProjectInput) =>
 
     yield* Effect.logDebug(`Found ${files.length} file(s) matching patterns`);
 
-    const { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers } = discoverHandlers(files);
+    const { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, mailerHandlers } = discoverHandlers(files);
 
     const totalHttpHandlers = httpHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalTableHandlers = tableHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalAppHandlers = appHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalStaticSiteHandlers = staticSiteHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalFifoQueueHandlers = fifoQueueHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalAllHandlers = totalHttpHandlers + totalTableHandlers + totalAppHandlers + totalStaticSiteHandlers + totalFifoQueueHandlers;
+    const totalMailerHandlers = mailerHandlers.reduce((acc, h) => acc + h.exports.length, 0);
+    const totalAllHandlers = totalHttpHandlers + totalTableHandlers + totalAppHandlers + totalStaticSiteHandlers + totalFifoQueueHandlers + totalMailerHandlers;
 
     if (totalAllHandlers === 0) {
       return yield* Effect.fail(new Error("No handlers found in matched files"));
@@ -501,10 +567,11 @@ export const deployProject = (input: DeployProjectInput) =>
     if (totalAppHandlers > 0) parts.push(`${totalAppHandlers} app`);
     if (totalStaticSiteHandlers > 0) parts.push(`${totalStaticSiteHandlers} site`);
     if (totalFifoQueueHandlers > 0) parts.push(`${totalFifoQueueHandlers} queue`);
+    if (totalMailerHandlers > 0) parts.push(`${totalMailerHandlers} mailer`);
     yield* Console.log(`\n  ${c.dim("Handlers:")} ${parts.join(", ")}`);
 
     // Check for missing SSM parameters
-    const discovered = { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers };
+    const discovered = { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, mailerHandlers };
     const requiredParams = collectRequiredParams(discovered, input.project, resolveStage(input.stage));
     if (requiredParams.length > 0) {
       const { missing } = yield* checkMissingParams(requiredParams).pipe(
@@ -520,8 +587,9 @@ export const deployProject = (input: DeployProjectInput) =>
       }
     }
 
-    // Build table name map for deps resolution
+    // Build resource maps for deps resolution
     const tableNameMap = buildTableNameMap(tableHandlers, input.project, resolveStage(input.stage));
+    const mailerDomainMap = buildMailerDomainMap(mailerHandlers);
 
     // Prepare layer
     const { layerArn, layerVersion, layerStatus, external } = yield* prepareLayer({
@@ -581,11 +649,13 @@ export const deployProject = (input: DeployProjectInput) =>
       for (const fn of exports) manifest.push({ name: fn.config.name ?? fn.exportName, type: "site" });
     for (const { exports } of fifoQueueHandlers)
       for (const fn of exports) manifest.push({ name: fn.config.name ?? fn.exportName, type: "queue" });
+    for (const { exports } of mailerHandlers)
+      for (const fn of exports) manifest.push({ name: fn.exportName, type: "mailer" });
 
     manifest.sort((a, b) => a.name.localeCompare(b.name));
     const logComplete = createLiveProgress(manifest);
     const ctx: DeployTaskCtx = {
-      input, layerArn, external, stage, tableNameMap, logComplete,
+      input, layerArn, external, stage, tableNameMap, mailerDomainMap, logComplete,
     };
 
     const httpResults: DeployResult[] = [];
@@ -593,6 +663,7 @@ export const deployProject = (input: DeployProjectInput) =>
     const appResults: DeployResult[] = [];
     const staticSiteResults: DeployStaticSiteResult[] = [];
     const fifoQueueResults: DeployFifoQueueResult[] = [];
+    const mailerResults: DeployMailerResult[] = [];
 
     const tasks = [
       ...(apiId ? buildHttpTasks(ctx, httpHandlers, apiId, httpResults) : []),
@@ -600,6 +671,7 @@ export const deployProject = (input: DeployProjectInput) =>
       ...(apiId ? buildAppTasks(ctx, appHandlers, apiId, appResults) : []),
       ...buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults),
       ...buildFifoQueueTasks(ctx, fifoQueueHandlers, fifoQueueResults),
+      ...buildMailerTasks(ctx, mailerHandlers, mailerResults),
     ];
 
     yield* Effect.all(tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
@@ -647,5 +719,5 @@ export const deployProject = (input: DeployProjectInput) =>
       yield* Effect.logDebug(`Deployment complete! API: ${apiUrl}`);
     }
 
-    return { apiId, apiUrl, httpResults, tableResults, appResults, staticSiteResults, fifoQueueResults };
+    return { apiId, apiUrl, httpResults, tableResults, appResults, staticSiteResults, fifoQueueResults, mailerResults };
   });
