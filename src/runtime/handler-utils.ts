@@ -89,7 +89,8 @@ export const readStatic = (filePath: string): string =>
 export const createHandlerRuntime = (
   handler: { setup?: (...args: any[]) => any; deps?: any; config?: any; static?: string[] },
   handlerType: "http" | "table" | "app" | "fifo-queue",
-  logLevel: LogLevel = "info"
+  logLevel: LogLevel = "info",
+  extraSetupArgs?: () => Record<string, unknown>
 ): HandlerRuntime => {
   const handlerName = process.env.EFF_HANDLER ?? "unknown";
   const rank = LOG_RANK[logLevel];
@@ -114,7 +115,8 @@ export const createHandlerRuntime = (
       const args: Record<string, unknown> = {};
       if (params) args.config = params;
       if (deps) args.deps = deps;
-      ctx = Object.keys(args).length > 0
+      if (extraSetupArgs) Object.assign(args, extraSetupArgs());
+      ctx = (Object.keys(args).length > 0 || extraSetupArgs)
         ? await handler.setup(args)
         : await handler.setup();
     }

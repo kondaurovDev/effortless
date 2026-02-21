@@ -1,4 +1,4 @@
-import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "../helpers";
+import type { LambdaWithPermissions, AnyParamRef, ResolveConfig, TableKey, TableItem } from "../helpers";
 import type { TableClient } from "../runtime/table-client";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -9,34 +9,18 @@ type ResolveDeps<D> = {
   [K in keyof D]: D[K] extends TableHandler<infer T, any, any, any, any> ? TableClient<T> : never;
 };
 
-/** DynamoDB attribute types for keys */
-export type KeyType = "string" | "number" | "binary";
-
-/**
- * DynamoDB table key definition
- */
-export type TableKey = {
-  /** Attribute name */
-  name: string;
-  /** Attribute type */
-  type: KeyType;
-};
-
 /** DynamoDB Streams view type - determines what data is captured in stream records */
 export type StreamView = "NEW_AND_OLD_IMAGES" | "NEW_IMAGE" | "OLD_IMAGE" | "KEYS_ONLY";
 
 /**
- * Configuration options extracted from DefineTableOptions (without onRecord/setup)
+ * Configuration options for defineTable (single-table design).
+ *
+ * Tables always use `pk (S)` + `sk (S)` keys, `tag (S)` discriminator,
+ * `data (M)` for domain fields, and `ttl (N)` for optional expiration.
  */
 export type TableConfig = LambdaWithPermissions & {
-  /** Partition key definition */
-  pk: TableKey;
-  /** Sort key definition (optional) */
-  sk?: TableKey;
   /** DynamoDB billing mode (default: "PAY_PER_REQUEST") */
   billingMode?: "PAY_PER_REQUEST" | "PROVISIONED";
-  /** TTL attribute name for automatic item expiration */
-  ttlAttribute?: string;
   /** Stream view type - what data to include in stream records (default: "NEW_AND_OLD_IMAGES") */
   streamView?: StreamView;
   /** Number of records to process in each Lambda invocation (1-10000, default: 100) */
@@ -45,22 +29,39 @@ export type TableConfig = LambdaWithPermissions & {
   batchWindow?: number;
   /** Where to start reading the stream (default: "LATEST") */
   startingPosition?: "LATEST" | "TRIM_HORIZON";
+  /**
+   * Name of the field in `data` that serves as the entity type discriminant.
+   * Effortless auto-copies `data[tagField]` to the top-level DynamoDB `tag` attribute on `put()`.
+   * Defaults to `"tag"`.
+   *
+   * @example
+   * ```typescript
+   * export const orders = defineTable({
+   *   tagField: "type",
+   *   schema: typed<{ type: "order"; amount: number }>(),
+   *   onRecord: async ({ record }) => { ... }
+   * });
+   * ```
+   */
+  tagField?: string;
 };
 
 /**
- * DynamoDB stream record passed to onRecord callback
+ * DynamoDB stream record passed to onRecord callback.
  *
- * @typeParam T - Type of the table items (new/old values)
+ * `new` and `old` are full `TableItem<T>` objects with the single-table envelope.
+ *
+ * @typeParam T - Type of the domain data (inside `data`)
  */
 export type TableRecord<T = Record<string, unknown>> = {
   /** Type of modification: INSERT, MODIFY, or REMOVE */
   eventName: "INSERT" | "MODIFY" | "REMOVE";
   /** New item value (present for INSERT and MODIFY) */
-  new?: T;
+  new?: TableItem<T>;
   /** Old item value (present for MODIFY and REMOVE) */
-  old?: T;
+  old?: TableItem<T>;
   /** Primary key of the affected item */
-  keys: Record<string, unknown>;
+  keys: TableKey;
   /** Sequence number for ordering */
   sequenceNumber?: string;
   /** Approximate timestamp when the modification occurred */
@@ -70,7 +71,7 @@ export type TableRecord<T = Record<string, unknown>> = {
 /**
  * Information about a failed record during batch processing
  *
- * @typeParam T - Type of the table items
+ * @typeParam T - Type of the domain data
  */
 export type FailedRecord<T = Record<string, unknown>> = {
   /** The record that failed to process */
@@ -80,16 +81,15 @@ export type FailedRecord<T = Record<string, unknown>> = {
 };
 
 /**
- * Setup factory type — conditional on whether deps/config are declared.
- * No deps/config: `() => C | Promise<C>`
- * With deps/config: `(args: { deps?, config? }) => C | Promise<C>`
+ * Setup factory type for table handlers.
+ * Always receives `table: TableClient<T>` (self-client for the handler's own table).
+ * Also receives `deps` and/or `config` when declared.
  */
-type SetupFactory<C, D, P> = [D | P] extends [undefined]
-  ? () => C | Promise<C>
-  : (args:
-      & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-      & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
-    ) => C | Promise<C>;
+type SetupFactory<C, T, D, P> = (args:
+    & { table: TableClient<T> }
+    & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
+    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
+  ) => C | Promise<C>;
 
 /**
  * Callback function type for processing a single DynamoDB stream record
@@ -125,10 +125,12 @@ export type TableBatchFn<T = Record<string, unknown>, C = undefined, D = undefin
   ) => Promise<void>;
 
 /** Base options shared by all defineTable variants */
-type DefineTableBase<T = Record<string, unknown>, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = TableConfig & {
+type DefineTableBase<T = Record<string, unknown>, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = Omit<TableConfig, "tagField"> & {
+  /** Name of the field in `data` that serves as the entity type discriminant (default: `"tag"`). */
+  tagField?: Extract<keyof T, string>;
   /**
-   * Decode/validate function for stream record items (new/old images).
-   * Called with the unmarshalled DynamoDB item; should return typed data or throw on validation failure.
+   * Decode/validate function for the `data` portion of stream record items.
+   * Called with the unmarshalled `data` attribute; should return typed data or throw on validation failure.
    * When provided, T is inferred from the return type — no need to specify generic parameters.
    */
   schema?: (input: unknown) => T;
@@ -143,7 +145,7 @@ type DefineTableBase<T = Record<string, unknown>, C = undefined, D = undefined, 
    * When deps/params are declared, receives them as argument.
    * Supports both sync and async return values.
    */
-  setup?: SetupFactory<C, D, P>;
+  setup?: SetupFactory<C, T, D, P>;
   /**
    * Dependencies on other handlers (tables, queues, etc.).
    * Typed clients are injected into the handler via the `deps` argument.
@@ -215,23 +217,22 @@ export type TableHandler<T = Record<string, unknown>, C = undefined, R = void, D
 };
 
 /**
- * Define a DynamoDB table with optional stream handler
+ * Define a DynamoDB table with optional stream handler (single-table design).
  *
- * Creates:
- * - DynamoDB table with specified key schema
- * - (If onRecord or onBatch provided) DynamoDB Stream + Lambda + Event Source Mapping
+ * Creates a table with fixed key schema: `pk (S)` + `sk (S)`, plus `tag (S)`,
+ * `data (M)`, and `ttl (N)` attributes. TTL is always enabled.
  *
  * @example Table with stream handler (typed)
  * ```typescript
- * type Order = { id: string; amount: number; status: string };
+ * type OrderData = { amount: number; status: string };
  *
- * export const orders = defineTable<Order>({
- *   pk: { name: "id", type: "string" },
+ * export const orders = defineTable({
+ *   schema: typed<OrderData>(),
  *   streamView: "NEW_AND_OLD_IMAGES",
  *   batchSize: 10,
  *   onRecord: async ({ record }) => {
  *     if (record.eventName === "INSERT") {
- *       console.log("New order:", record.new?.amount);
+ *       console.log("New order:", record.new?.data.amount);
  *     }
  *   }
  * });
@@ -239,10 +240,7 @@ export type TableHandler<T = Record<string, unknown>, C = undefined, R = void, D
  *
  * @example Table only (no Lambda)
  * ```typescript
- * export const users = defineTable({
- *   pk: { name: "id", type: "string" },
- *   sk: { name: "email", type: "string" }
- * });
+ * export const users = defineTable({});
  * ```
  */
 export const defineTable = <

@@ -15,6 +15,19 @@ const LAMBDA_ASSUME_ROLE_POLICY = JSON.stringify({
   ]
 });
 
+const EDGE_LAMBDA_ASSUME_ROLE_POLICY = JSON.stringify({
+  Version: "2012-10-17",
+  Statement: [
+    {
+      Effect: "Allow",
+      Principal: {
+        Service: ["lambda.amazonaws.com", "edgelambda.amazonaws.com"]
+      },
+      Action: "sts:AssumeRole"
+    }
+  ]
+});
+
 const BASIC_EXECUTION_POLICY_ARN = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole";
 
 export const ensureRole = (
@@ -70,6 +83,55 @@ export const ensureRole = (
     if (additionalActions && additionalActions.length > 0) {
       yield* ensureInlinePolicy(roleName, name, additionalActions);
     }
+
+    yield* Effect.sleep("10 seconds");
+
+    return createResult.Role!.Arn!;
+  });
+
+export const ensureEdgeRole = (
+  project: string,
+  stage: string,
+  name: string,
+  tags?: Record<string, string>
+) =>
+  Effect.gen(function* () {
+    const roleName = `${project}-${stage}-${name}-role`;
+
+    const existingRole = yield* iam.make("get_role", { RoleName: roleName }).pipe(
+      Effect.map(r => r.Role),
+      Effect.catchIf(
+        e => e._tag === "IAMError" && e.is("NoSuchEntityException"),
+        () => Effect.succeed(undefined)
+      )
+    );
+
+    if (existingRole) {
+      yield* Effect.logDebug(`Using existing edge role: ${roleName}`);
+
+      if (tags) {
+        yield* iam.make("tag_role", {
+          RoleName: roleName,
+          Tags: toAwsTagList(tags)
+        });
+      }
+
+      return existingRole.Arn!;
+    }
+
+    yield* Effect.logDebug(`Creating edge role: ${roleName}`);
+
+    const createResult = yield* iam.make("create_role", {
+      RoleName: roleName,
+      AssumeRolePolicyDocument: EDGE_LAMBDA_ASSUME_ROLE_POLICY,
+      Description: `Execution role for Lambda@Edge function ${name}`,
+      Tags: tags ? toAwsTagList(tags) : undefined
+    });
+
+    yield* iam.make("attach_role_policy", {
+      RoleName: roleName,
+      PolicyArn: BASIC_EXECUTION_POLICY_ARN
+    });
 
     yield* Effect.sleep("10 seconds");
 

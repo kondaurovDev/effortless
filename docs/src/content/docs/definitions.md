@@ -14,7 +14,7 @@ Some definitions include a Lambda handler (a callback like `onRequest`, `onRecor
 | [defineHttp](#definehttp) | API Gateway + Lambda | Yes (`onRequest`) |
 | [defineTable](#definetable) | DynamoDB table + optional stream Lambda | No — table-only when no `onRecord`/`onBatch` |
 | [defineApp](#defineapp) | API Gateway + Lambda serving static files | No (built-in file server) |
-| [defineStaticSite](#definestaticsite) | S3 + CloudFront | No (no Lambda at all) |
+| [defineStaticSite](#definestaticsite) | S3 + CloudFront + optional Lambda@Edge | No (optional `middleware`) |
 | [defineFifoQueue](#definefifoqueue) | SQS FIFO + Lambda | Yes (`onMessage`/`onBatch`) |
 | [defineSchedule](#defineschedule) | EventBridge + Lambda | Yes — Planned |
 | [defineEvent](#defineevent) | EventBridge + Lambda | Yes — Planned |
@@ -25,7 +25,6 @@ Resource-only definitions are useful when you need the infrastructure but handle
 ```typescript
 // Just a table — no Lambda, no stream
 export const users = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<User>(),
 });
 
@@ -35,7 +34,10 @@ export const createUser = defineHttp({
   path: "/users",
   deps: { users },
   onRequest: async ({ req, deps }) => {
-    await deps.users.put({ id: "1", name: "Alice" });
+    await deps.users.put({
+      pk: "USER#1", sk: "PROFILE",
+      data: { tag: "user", name: "Alice", email: "alice@example.com" },
+    });
     return { status: 201 };
   },
 });
@@ -52,11 +54,10 @@ Use `schema` to provide the data type. For type-only schemas (no runtime validat
 ```typescript
 import { defineTable, defineHttp, defineFifoQueue, typed, param } from "effortless-aws";
 
-type Order = { id: string; amount: number; status: string };
+type Order = { tag: string; amount: number; status: string };
 
 export const orders = defineTable({
-  pk: { name: "id", type: "string" },
-  schema: typed<Order>(),          // T = Order — inferred from schema
+  schema: typed<Order>(),            // T = Order — inferred from schema
   config: {
     threshold: param("threshold", Number),
   },
@@ -65,7 +66,7 @@ export const orders = defineTable({
   }),
   deps: { users },                   // D — inferred from deps object
   onRecord: async ({ record, ctx, deps, config }) => {
-    // record.new is Order | undefined
+    // record.new?.data is Order | undefined
     // ctx is { db: Pool }
     // deps.users is TableClient<User>
     // config.threshold is number
@@ -250,7 +251,10 @@ export const createOrder = defineHttp({
   deps: { orders },
   onRequest: async ({ req, deps }) => {
     // deps.orders is TableClient<Order> — typed from the table's generic
-    await deps.orders.put({ orderId: "abc-123", amount: 99 });
+    await deps.orders.put({
+      pk: "USER#123", sk: "ORDER#456",
+      data: { tag: "order", amount: 99, status: "pending" },
+    });
     return { status: 201 };
   }
 });
@@ -270,19 +274,27 @@ Dependencies are auto-wired: the framework sets environment variables, IAM permi
 
 Creates: DynamoDB Table + (optional) Stream + Lambda + Event Source Mapping
 
+Every table uses an opinionated **single-table design** with a fixed structure:
+
+| Attribute | Type | Purpose |
+|-----------|------|---------|
+| `pk` | String | Partition key |
+| `sk` | String | Sort key |
+| `tag` | String | Entity type discriminant (auto-extracted from your data) |
+| `data` | Map | Your domain data (typed as `T`) |
+| `ttl` | Number | Optional TTL (always enabled, set to auto-expire items) |
+
+Your domain type `T` is what goes inside `data`. The envelope (`pk`, `sk`, `tag`, `ttl`) is managed by effortless.
+
 ```typescript
 export const orders = defineTable({
-  // Required
-  pk: { name: string, type: "string" | "number" | "binary" },
-
   // Optional — type inference
   schema?: (input: unknown) => T,     // infers record type T (or use typed<T>())
 
   // Optional — table
   name?: string,                      // defaults to export name
-  sk?: { name: string, type: "string" | "number" | "binary" },
   billingMode?: "PAY_PER_REQUEST" | "PROVISIONED",  // default: PAY_PER_REQUEST
-  ttlAttribute?: string,
+  tagField?: string,                  // field in data for entity discriminant (default: "tag")
 
   // Optional — stream
   streamView?: "NEW_AND_OLD_IMAGES" | "NEW_IMAGE" | "OLD_IMAGE" | "KEYS_ONLY",  // default: NEW_AND_OLD_IMAGES
@@ -308,23 +320,38 @@ export const orders = defineTable({
 });
 ```
 
-Use `schema` or `typed<T>()` to provide the record type. This enables TypeScript to infer all generic parameters from the options object — no need for explicit generics like `defineTable<Order>(...)`.
+Use `schema` or `typed<T>()` to provide the data type. `T` is the domain data stored inside the `data` attribute — not the full DynamoDB item. TypeScript infers all generic parameters from the options object.
 
 ```typescript
 import { defineTable, typed } from "effortless-aws";
 
-type Order = { id: string; amount: number; status: string };
+type Order = { tag: string; amount: number; status: string };
 
 // Option 1: typed<T>() — type-only, no runtime validation
 export const orders = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<Order>(),
 });
 
 // Option 2: schema function — with runtime validation
 export const orders = defineTable({
-  pk: { name: "id", type: "string" },
-  schema: Schema.decodeUnknownSync(OrderSchema),
+  schema: (input: unknown) => {
+    const obj = input as Record<string, unknown>;
+    if (typeof obj?.amount !== "number") throw new Error("amount required");
+    return { tag: String(obj.tag), amount: obj.amount, status: String(obj.status) };
+  },
+});
+```
+
+### Tag field (`tagField`)
+
+Every item has a top-level `tag` attribute in DynamoDB (useful for GSIs and filtering). Effortless auto-extracts it from your data — by default from `data.tag`. If your discriminant field is named differently, set `tagField`:
+
+```typescript
+type Order = { type: "order"; amount: number };
+
+export const orders = defineTable({
+  tagField: "type",  // → extracts data.type as the DynamoDB tag attribute
+  schema: typed<Order>(),
 });
 ```
 
@@ -334,22 +361,32 @@ All stream callbacks (`onRecord`, `onBatch`, `onBatchComplete`) receive:
 
 | Arg | Type | Description |
 |-----|------|-------------|
-| `record` / `records` | `TableRecord<T>` / `TableRecord<T>[]` | Stream records with typed `new`/`old` values |
+| `record` / `records` | `TableRecord<T>` / `TableRecord<T>[]` | Stream records with typed `new`/`old` `TableItem<T>` values |
 | `table` | `TableClient<T>` | Typed client for **this** table (auto-injected) |
 | `ctx` | `C` | Result from `setup()` factory (if provided) |
 | `deps` | `{ [key]: TableClient }` | Typed clients for dependent tables (if `deps` is set) |
 | `config` | `ResolveConfig<P>` | SSM parameter values (if `config` is set) |
 
+Stream records follow the `TableItem<T>` structure:
+
+```typescript
+record.eventName      // "INSERT" | "MODIFY" | "REMOVE"
+record.new?.pk        // string
+record.new?.sk        // string
+record.new?.tag       // string (entity discriminant)
+record.new?.data      // T (your typed domain data)
+record.new?.ttl       // number | undefined
+record.keys           // { pk: string; sk: string }
+```
+
 ### Per-record processing
 
 ```typescript
 export const orders = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<Order>(),
   onRecord: async ({ record, table }) => {
-    if (record.eventName === "INSERT") {
-      // table is TableClient<Order> — write back to the same table
-      await table.put({ ...record.new!, status: "processed" });
+    if (record.eventName === "INSERT" && record.new) {
+      console.log(`New order: $${record.new.data.amount}`);
     }
   }
 });
@@ -361,30 +398,94 @@ Each record is processed individually. If one fails, only that record is retried
 
 ```typescript
 export const events = defineTable({
-  pk: { name: "id", type: "string" },
-  schema: typed<Event>(),
-  onBatch: async ({ records, table }) => {
-    // Process all records at once
-    for (const r of records) {
-      await table.put({ ...r.new!, processed: true });
-    }
+  schema: typed<ClickEvent>(),
+  batchSize: 100,
+  onBatch: async ({ records }) => {
+    const inserts = records
+      .filter(r => r.eventName === "INSERT")
+      .map(r => r.new!.data);
+    await bulkIndex(inserts);
   }
 });
 ```
 
 All records in a batch are processed together. If the handler throws, all records are reported as failed.
 
-### Table self-client (`table`)
+### TableClient
 
-Every table handler automatically receives a `table: TableClient<T>` argument — a typed client for its own table. No configuration needed. Use it to read/write back to the same table from stream handlers.
+Every table handler receives a `table: TableClient<T>` — a typed client for its own table. Other handlers get it via `deps`. `T` is your domain data type (what goes inside `data`).
 
 ```typescript
 TableClient<T>
-  put(item: T): Promise<void>
-  get(key: Partial<T>): Promise<T | undefined>
-  delete(key: Partial<T>): Promise<void>
-  query(params: QueryParams): Promise<T[]>
+  put(item: PutInput<T>, options?: { ifNotExists?: boolean }): Promise<void>
+  get(key: { pk: string; sk: string }): Promise<TableItem<T> | undefined>
+  delete(key: { pk: string; sk: string }): Promise<void>
+  update(key: { pk: string; sk: string }, actions: UpdateActions<T>): Promise<void>
+  query(params: QueryParams): Promise<TableItem<T>[]>
   tableName: string
+```
+
+**put** — writes an item. Tag is auto-extracted from `data[tagField]`. Use `{ ifNotExists: true }` to prevent overwriting existing items.
+
+```typescript
+await table.put({
+  pk: "USER#123", sk: "ORDER#456",
+  data: { tag: "order", amount: 100, status: "new" },
+});
+
+// Conditional write — fails if item already exists
+await table.put(
+  { pk: "USER#123", sk: "ORDER#456", data: { tag: "order", amount: 100, status: "new" } },
+  { ifNotExists: true },
+);
+```
+
+**get / delete** — by partition key + sort key:
+
+```typescript
+const item = await table.get({ pk: "USER#123", sk: "ORDER#456" });
+// item: { pk, sk, tag, data: Order, ttl? } | undefined
+
+await table.delete({ pk: "USER#123", sk: "ORDER#456" });
+```
+
+**update** — partial updates without reading the full item. `set`, `append`, and `remove` target fields inside `data` (effortless auto-prefixes `data.` in the DynamoDB expression). `tag` and `ttl` update top-level attributes.
+
+```typescript
+await table.update({ pk: "USER#123", sk: "ORDER#456" }, {
+  set: { status: "shipped" },         // SET data.status = "shipped"
+  append: { tags: ["priority"] },     // Append to data.tags list
+  remove: ["tempField"],              // REMOVE data.tempField
+  tag: "shipped-order",               // Update top-level tag
+  ttl: 1700000000,                    // Set TTL (null to remove)
+});
+```
+
+**query** — by partition key with optional sort key conditions:
+
+```typescript
+// All orders for a user
+const orders = await table.query({ pk: "USER#123" });
+
+// Orders with sk prefix
+const orders = await table.query({ pk: "USER#123", sk: { begins_with: "ORDER#" } });
+
+// Sort key conditions:
+sk: "exact-value"                 // =
+sk: { begins_with: "PREFIX" }     // begins_with(sk, :v)
+sk: { gt: "value" }               // sk > :v
+sk: { gte: "value" }              // sk >= :v
+sk: { lt: "value" }               // sk < :v
+sk: { lte: "value" }              // sk <= :v
+sk: { between: ["a", "z"] }       // sk BETWEEN :v1 AND :v2
+
+// Pagination and ordering
+const recent = await table.query({
+  pk: "USER#123",
+  sk: { begins_with: "ORDER#" },
+  limit: 10,
+  scanIndexForward: false,  // newest first
+});
 ```
 
 ### Dependencies
@@ -393,13 +494,14 @@ TableClient<T>
 import { users } from "./users.js";
 
 export const orders = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<Order>(),
   deps: { users },
-  onRecord: async ({ record, table, deps }) => {
-    // deps.users is TableClient<User>
-    const user = await deps.users.get({ id: record.new!.userId });
-    await table.put({ ...record.new!, userName: user?.name });
+  onRecord: async ({ record, deps }) => {
+    const userId = record.new?.data.userId;
+    if (userId) {
+      const user = await deps.users.get({ pk: `USER#${userId}`, sk: "PROFILE" });
+      console.log(`Order by ${user?.data.name}`);
+    }
   }
 });
 ```
@@ -408,16 +510,13 @@ export const orders = defineTable({
 
 ```typescript
 export const ordersWithBatch = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<Order>(),
   onRecord: async ({ record }) => {
-    // Return value is collected into results array
-    return { id: record.new!.id, amount: record.new!.amount };
+    return { amount: record.new?.data.amount ?? 0 };
   },
-  onBatchComplete: async ({ results, failures, table }) => {
-    // results: { id, amount }[] — accumulated from onRecord
-    // failures: FailedRecord<Order>[] — records that threw
-    console.log(`Processed ${results.length}, failed ${failures.length}`);
+  onBatchComplete: async ({ results, failures }) => {
+    const total = results.reduce((sum, r) => sum + r.amount, 0);
+    console.log(`Batch total: $${total}, failed: ${failures.length}`);
   }
 });
 ```
@@ -427,17 +526,20 @@ export const ordersWithBatch = defineTable({
 ```typescript
 // Just creates the DynamoDB table — no stream, no Lambda
 export const users = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<User>(),
 });
 ```
 
 **Built-in best practices**:
+- **Single-table design** — fixed `pk`/`sk`/`tag`/`data`/`ttl` structure. Flexible access patterns via composite keys, no schema migrations needed.
 - **Partial batch failures** — each record is processed individually. If one fails, only that record is retried via `PartialBatchResponse`. The rest of the batch succeeds.
-- **Typed records** — use `schema: typed<Order>()` for type inference, or a validation function for runtime checks. Gives you typed `record.new` and `record.old` with automatic DynamoDB unmarshalling.
+- **Typed records** — use `schema: typed<Order>()` for type inference, or a validation function for runtime checks. `schema` validates the `data` portion of stream records.
 - **Table self-client** — `table` arg provides a typed `TableClient<T>` for the handler's own table, auto-injected with no config.
+- **Smart updates** — `update()` auto-prefixes `data.` for domain fields, so you can do partial updates without reading the full item.
 - **Typed dependencies** — `deps` provides typed `TableClient<T>` instances for other tables with auto-wired IAM and env vars.
 - **Batch accumulation** — `onRecord` return values are collected into `results` for `onBatchComplete`. Use this for bulk writes, aggregations, or reporting.
+- **Auto-TTL** — TTL is always enabled on the `ttl` attribute. Set it on `put()` or `update()` and DynamoDB auto-deletes expired items.
+- **Conditional writes** — use `{ ifNotExists: true }` on `put()` for idempotent inserts.
 - **Cold start optimization** — the `setup` factory runs once and is cached across invocations.
 - **Progressive complexity** — omit handlers for table-only. Add `onRecord` for stream processing. Add `onBatch` for batch mode. Add `deps` for cross-table access.
 - **Auto-infrastructure** — DynamoDB table, stream, Lambda, event source mapping, and IAM permissions are all created on deploy from this single definition.
@@ -492,7 +594,7 @@ For CDN-backed sites (S3 + CloudFront), use [defineStaticSite](#definestaticsite
 
 ## defineStaticSite
 
-Creates: S3 bucket + CloudFront distribution + Origin Access Control + CloudFront Function (viewer request).
+Creates: S3 bucket + CloudFront distribution + Origin Access Control + CloudFront Function (viewer request) + optional Lambda@Edge (middleware).
 
 ```typescript
 export const docs = defineStaticSite({
@@ -505,6 +607,7 @@ export const docs = defineStaticSite({
   spa?: boolean,                     // SPA mode: serve index for all paths (default: false)
   build?: string,                    // shell command to run before deploy
   domain?: string,                   // custom domain (e.g. "example.com")
+  middleware?: (request) => ...,     // Lambda@Edge middleware for auth, redirects, etc.
 });
 ```
 
@@ -553,13 +656,78 @@ Before using `domain`, create an ACM certificate in the **us-east-1** region tha
 Having both `example.com` and `www.example.com` serve the same content creates duplicate content issues for search engines. Effortless handles this automatically — when your ACM certificate covers `www`, a 301 redirect is set up so search engines index only the non-www version.
 :::
 
+### Middleware (Lambda@Edge)
+
+Add `middleware` to run custom Node.js code before CloudFront serves any page. Use it for authentication, access control, or redirects.
+
+```typescript
+export const admin = defineStaticSite({
+  dir: "admin/dist",
+  domain: "admin.example.com",
+  middleware: async (request) => {
+    if (!request.cookies.session) {
+      return { redirect: "https://example.com/login" };
+    }
+    // return void → serve the page normally
+  },
+});
+```
+
+The middleware function receives a simplified request object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `uri` | `string` | Request path (e.g. `/admin/users`) |
+| `method` | `string` | HTTP method (`GET`, `POST`, etc.) |
+| `querystring` | `string` | Raw query string |
+| `headers` | `Record<string, string>` | Flattened request headers |
+| `cookies` | `Record<string, string>` | Parsed cookies |
+
+Return values control what happens next:
+
+| Return | Effect |
+|--------|--------|
+| `void` / `undefined` | Continue serving — the static file is returned normally |
+| `{ redirect: string, status?: 301 \| 302 \| 307 \| 308 }` | Redirect to another URL (default: 302) |
+| `{ status: 403, body?: string }` | Block access with a 403 Forbidden response |
+
+When middleware is present, it replaces the default CloudFront Function — the middleware handles both your custom logic **and** URL rewriting (`/path/` → `/path/index.html`) automatically.
+
+:::note[Lambda@Edge constraints]
+Middleware runs as Lambda@Edge on the `viewer-request` event. It has full Node.js runtime access (JWT validation, crypto, network calls), but with some constraints: deployed to **us-east-1** only (CloudFront replicates globally), **no environment variables** (so `deps` and `config` are not available), **x86_64** architecture, 128 MB memory, and 5-second timeout.
+:::
+
+:::tip[Separate domains for public and protected content]
+Each `defineStaticSite` creates its own CloudFront distribution, so you can use different configurations for public and protected content:
+
+```typescript
+// Public landing — no middleware, just CDN
+export const landing = defineStaticSite({
+  dir: "landing/dist",
+  domain: "example.com",
+});
+
+// Protected admin — with auth middleware
+export const admin = defineStaticSite({
+  dir: "admin/dist",
+  domain: "admin.example.com",
+  middleware: async (request) => {
+    if (!request.cookies.session) {
+      return { redirect: "https://example.com/login" };
+    }
+  },
+});
+```
+:::
+
 **Built-in best practices**:
 - **URL rewriting** — automatically resolves `/path/` to `/path/index.html` via CloudFront Function.
 - **SPA support** — when `spa: true`, 403/404 errors return `index.html` for client-side routing.
 - **Global distribution** — served via CloudFront edge locations worldwide.
 - **Custom domains** — set `domain` for a custom domain with automatic ACM certificate lookup and optional www→non-www redirect.
+- **Edge middleware** — add `middleware` for auth checks, redirects, or access control via Lambda@Edge. Full Node.js runtime at the edge — JWT validation, cookie checks, custom logic.
 - **Orphan cleanup** — when CloudFront Functions become unused (e.g. after config changes), they are automatically deleted on the next deploy.
-- **Auto-infrastructure** — S3 bucket, CloudFront distribution, Origin Access Control, CloudFront Function, cache invalidation, and SSL certificate configuration on deploy.
+- **Auto-infrastructure** — S3 bucket, CloudFront distribution, Origin Access Control, CloudFront Function (or Lambda@Edge), cache invalidation, and SSL certificate configuration on deploy.
 
 ---
 
@@ -676,7 +844,10 @@ export const orderProcessor = defineFifoQueue({
   deps: { orders },
   onMessage: async ({ message, deps }) => {
     // deps.orders is TableClient<Order>
-    await deps.orders.put({ id: message.body.orderId, status: "processing" });
+    await deps.orders.put({
+      pk: `ORDER#${message.body.orderId}`, sk: "STATUS",
+      data: { tag: "order", status: "processing" },
+    });
   },
 });
 ```

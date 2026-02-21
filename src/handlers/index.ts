@@ -17,8 +17,6 @@ export type {
   TableConfig,
   TableRecord,
   TableHandler,
-  TableKey,
-  KeyType,
   StreamView,
   DefineTableOptions,
   TableRecordFn,

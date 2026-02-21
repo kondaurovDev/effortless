@@ -402,13 +402,14 @@ const buildStaticSiteTasks = (
 ): Effect.Effect<void, unknown>[] => {
   const tasks: Effect.Effect<void, unknown>[] = [];
   const { region } = ctx.input;
-  for (const { exports } of handlers) {
+  for (const { file, exports } of handlers) {
     for (const fn of exports) {
       tasks.push(
         Effect.gen(function* () {
           const result = yield* deployStaticSite({
             projectDir: ctx.input.projectDir, project: ctx.input.project,
             stage: ctx.input.stage, region, fn,
+            ...(fn.hasHandler ? { file } : {}),
           }).pipe(Effect.provide(Aws.makeClients({
             s3: { region }, cloudfront: { region: "us-east-1" },
             resource_groups_tagging_api: { region: "us-east-1" },

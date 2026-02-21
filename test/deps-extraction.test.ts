@@ -131,7 +131,6 @@ describe("deps extraction", () => {
 
         export const orders = defineTable({
           name: "orders",
-          pk: { name: "id", type: "string" },
           deps: { users },
           onRecord: async ({ record, deps }) => {}
         });
@@ -149,7 +148,6 @@ describe("deps extraction", () => {
 
         export const orders = defineTable({
           name: "orders",
-          pk: { name: "id", type: "string" },
           onRecord: async ({ record }) => {}
         });
       `;
@@ -167,7 +165,6 @@ describe("deps extraction", () => {
 
         export const orders = defineTable({
           name: "orders",
-          pk: { name: "id", type: "string" },
           deps: { users },
           onRecord: async ({ record }) => {}
         });

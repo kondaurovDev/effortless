@@ -1,8 +1,11 @@
 import { Effect } from "effect";
+import { Architecture } from "@aws-sdk/client-lambda";
 import { execSync } from "child_process";
 import * as path from "path";
 import type { ExtractedStaticSiteFunction } from "~/build/bundle";
+import { bundle, zip } from "~/build/bundle";
 import {
+  Aws,
   makeTags,
   resolveStage,
   type TagContext,
@@ -10,6 +13,9 @@ import {
   syncFiles,
   putBucketPolicyForOAC,
   ensureOAC,
+  ensureEdgeRole,
+  ensureLambda,
+  publishVersion,
   ensureViewerRequestFunction,
   ensureDistribution,
   invalidateDistribution,
@@ -24,6 +30,8 @@ export type DeployStaticSiteInput = {
   stage?: string;
   region: string;
   fn: ExtractedStaticSiteFunction;
+  /** Source file path (required when middleware is present) */
+  file?: string;
 };
 
 export type DeployStaticSiteResult = {
@@ -34,6 +42,66 @@ export type DeployStaticSiteResult = {
   bucketName: string;
 };
 
+/** Deploy middleware as Lambda@Edge in us-east-1 */
+const deployMiddlewareLambda = (input: {
+  projectDir: string;
+  project: string;
+  stage: string;
+  handlerName: string;
+  file: string;
+  exportName: string;
+  tagCtx: TagContext;
+}) =>
+  Effect.gen(function* () {
+    const { projectDir, project, stage, handlerName, file, exportName, tagCtx } = input;
+    const middlewareName = `${handlerName}-middleware`;
+
+    yield* Effect.logDebug(`Deploying middleware Lambda@Edge: ${middlewareName}`);
+
+    // 1. Create IAM role with edgelambda trust
+    const roleArn = yield* ensureEdgeRole(
+      project,
+      stage,
+      middlewareName,
+      makeTags(tagCtx, "iam-role")
+    );
+
+    // 2. Bundle middleware code
+    const bundled = yield* bundle({
+      projectDir,
+      file,
+      exportName,
+      type: "staticSite",
+    });
+    const code = yield* zip({ content: bundled });
+
+    // 3. Deploy Lambda to us-east-1 (x86_64, no env vars, no layers)
+    const { functionArn } = yield* ensureLambda({
+      project,
+      stage,
+      name: middlewareName,
+      region: "us-east-1",
+      roleArn,
+      code,
+      memory: 128,
+      timeout: 5,
+      architecture: Architecture.x86_64,
+      tags: makeTags(tagCtx, "lambda"),
+    }).pipe(
+      Effect.provide(Aws.makeClients({ lambda: { region: "us-east-1" } }))
+    );
+
+    // 4. Publish version (Lambda@Edge requires versioned ARN)
+    const { versionArn } = yield* publishVersion(
+      `${project}-${stage}-${middlewareName}`
+    ).pipe(
+      Effect.provide(Aws.makeClients({ lambda: { region: "us-east-1" } }))
+    );
+
+    yield* Effect.logDebug(`Middleware deployed: ${versionArn}`);
+    return { versionArn };
+  });
+
 /** @internal */
 export const deployStaticSite = (input: DeployStaticSiteInput) =>
   Effect.gen(function* () {
@@ -41,6 +109,7 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     const { exportName, config } = fn;
     const stage = resolveStage(input.stage);
     const handlerName = config.name ?? exportName;
+    const hasMiddleware = fn.hasHandler;
 
     const tagCtx: TagContext = { project, stage, handler: handlerName };
 
@@ -55,7 +124,7 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
 
     // 2. Ensure S3 bucket
     const bucketName = `${project}-${stage}-${handlerName}-site`.toLowerCase();
-    const { bucketArn } = yield* ensureBucket({
+    yield* ensureBucket({
       name: bucketName,
       region,
       tags: makeTags(tagCtx, "s3-bucket"),
@@ -92,21 +161,35 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
       }
     }
 
-    // 4. Ensure viewer request function (URL rewrite + optional www redirect)
+    // 4. Viewer request: either Lambda@Edge (middleware) or CloudFront Function (URL rewrite)
     const isSpa = config.spa ?? false;
-    const needsUrlRewrite = !isSpa;
-    const needsWwwRedirect = !!wwwDomain;
     let urlRewriteFunctionArn: string | undefined;
+    let lambdaEdgeArn: string | undefined;
 
-    if (needsUrlRewrite || needsWwwRedirect) {
-      const fnName = needsWwwRedirect
-        ? `${project}-${stage}-${handlerName}-viewer-req`
-        : `${project}-${stage}-url-rewrite`;
-      const result = yield* ensureViewerRequestFunction(fnName, {
-        rewriteUrls: needsUrlRewrite,
-        redirectWwwDomain: wwwDomain,
-      });
-      urlRewriteFunctionArn = result.functionArn;
+    if (hasMiddleware && input.file) {
+      // Lambda@Edge handles both middleware logic and URL rewrite
+      const result = yield* deployMiddlewareLambda({
+        projectDir, project, stage, handlerName,
+        file: input.file, exportName, tagCtx,
+      }).pipe(
+        Effect.provide(Aws.makeClients({ iam: { region: "us-east-1" } }))
+      );
+      lambdaEdgeArn = result.versionArn;
+    } else {
+      // CloudFront Function for URL rewrite + optional www redirect
+      const needsUrlRewrite = !isSpa;
+      const needsWwwRedirect = !!wwwDomain;
+
+      if (needsUrlRewrite || needsWwwRedirect) {
+        const fnName = needsWwwRedirect
+          ? `${project}-${stage}-${handlerName}-viewer-req`
+          : `${project}-${stage}-url-rewrite`;
+        const result = yield* ensureViewerRequestFunction(fnName, {
+          rewriteUrls: needsUrlRewrite,
+          redirectWwwDomain: wwwDomain,
+        });
+        urlRewriteFunctionArn = result.functionArn;
+      }
     }
 
     // 5. Ensure CloudFront distribution
@@ -122,6 +205,7 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
       index,
       tags: makeTags(tagCtx, "cloudfront-distribution"),
       urlRewriteFunctionArn,
+      lambdaEdgeArn,
       aliases,
       acmCertificateArn,
     });

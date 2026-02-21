@@ -1,5 +1,6 @@
 import { unmarshall } from "@aws-sdk/util-dynamodb";
 import type { TableHandler, TableRecord, FailedRecord } from "~/handlers/define-table";
+import type { TableItem, TableKey } from "~/helpers";
 import { createTableClient } from "./table-client";
 import { createHandlerRuntime } from "./handler-utils";
 
@@ -22,6 +23,14 @@ type BatchItemFailure = {
   itemIdentifier: string;
 };
 
+const toTableItem = <T>(raw: Record<string, unknown>, decode: (input: unknown) => T): TableItem<T> => ({
+  pk: raw.pk as string,
+  sk: raw.sk as string,
+  tag: raw.tag as string,
+  data: decode(raw.data),
+  ...(raw.ttl !== undefined ? { ttl: raw.ttl as number } : {}),
+});
+
 const parseRecords = <T>(rawRecords: DynamoDBStreamRecord[], schema?: (input: unknown) => T): { records: TableRecord<T>[]; sequenceNumbers: Map<TableRecord<T>, string> } => {
   const records: TableRecord<T>[] = [];
   const sequenceNumbers = new Map<TableRecord<T>, string>();
@@ -32,12 +41,13 @@ const parseRecords = <T>(rawRecords: DynamoDBStreamRecord[], schema?: (input: un
 
     const newImage = rawRecord.dynamodb?.NewImage ? unmarshall(rawRecord.dynamodb.NewImage) : undefined;
     const oldImage = rawRecord.dynamodb?.OldImage ? unmarshall(rawRecord.dynamodb.OldImage) : undefined;
+    const keys = unmarshall(rawRecord.dynamodb.Keys) as TableKey;
 
     const record = {
       eventName: rawRecord.eventName,
-      new: newImage !== undefined ? decode(newImage) : undefined,
-      old: oldImage !== undefined ? decode(oldImage) : undefined,
-      keys: unmarshall(rawRecord.dynamodb.Keys),
+      new: newImage !== undefined ? toTableItem(newImage, decode) : undefined,
+      old: oldImage !== undefined ? toTableItem(oldImage, decode) : undefined,
+      keys,
       sequenceNumber: rawRecord.dynamodb?.SequenceNumber,
       timestamp: rawRecord.dynamodb?.ApproximateCreationDateTime,
     } as TableRecord<T>;
@@ -67,17 +77,22 @@ export const wrapTableStream = <T, C, R>(handler: TableHandler<T, C, R>) => {
     throw new Error("wrapTableStream requires a handler with onRecord or onBatch defined");
   }
 
-  const rt = createHandlerRuntime(handler, "table", handler.__spec.logLevel ?? "info");
-  const handleError = handler.onError ?? ((e: unknown) => console.error(`[effortless:${rt.handlerName}]`, e));
+  const tagField = handler.__spec.tagField ?? "tag";
 
   let selfClient: ReturnType<typeof createTableClient> | null = null;
   const getSelfClient = () => {
     if (selfClient) return selfClient;
     const tableName = process.env[ENV_TABLE_SELF];
     if (!tableName) return undefined;
-    selfClient = createTableClient(tableName);
+    selfClient = createTableClient(tableName, { tagField });
     return selfClient;
   };
+
+  const rt = createHandlerRuntime(handler, "table", handler.__spec.logLevel ?? "info", () => {
+    const table = getSelfClient();
+    return table ? { table } : {};
+  });
+  const handleError = handler.onError ?? ((e: unknown) => console.error(`[effortless:${rt.handlerName}]`, e));
 
   return async (event: DynamoDBStreamEvent) => {
     const startTime = Date.now();

@@ -7,7 +7,7 @@ const parseSource = (source: string) => {
   return project.createSourceFile("input.ts", source);
 };
 
-const RUNTIME_PROPS = ["onRequest", "onRecord", "onBatchComplete", "onBatch", "onMessage", "setup", "schema", "onError", "deps", "config", "static"];
+const RUNTIME_PROPS = ["onRequest", "onRecord", "onBatchComplete", "onBatch", "onMessage", "setup", "schema", "onError", "deps", "config", "static", "middleware"];
 
 const buildConfigWithoutRuntime = (obj: ObjectLiteralExpression): string => {
   const props = obj.getProperties()
@@ -179,9 +179,9 @@ export const handlerRegistry = {
   },
   staticSite: {
     defineFn: "defineStaticSite",
-    handlerProps: [],
-    wrapperFn: "",
-    wrapperPath: "",
+    handlerProps: ["middleware"],
+    wrapperFn: "wrapMiddleware",
+    wrapperPath: "~/runtime/wrap-middleware",
   },
   fifoQueue: {
     defineFn: "defineFifoQueue",

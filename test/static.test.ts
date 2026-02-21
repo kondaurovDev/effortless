@@ -115,7 +115,6 @@ describe("static extraction", () => {
 
         export const orders = defineTable({
           name: "orders",
-          pk: { name: "id", type: "string" },
           static: ["src/templates/report.ejs"],
           onRecord: async ({ record }) => {}
         });
@@ -133,7 +132,6 @@ describe("static extraction", () => {
 
         export const orders = defineTable({
           name: "orders",
-          pk: { name: "id", type: "string" },
           onRecord: async ({ record }) => {}
         });
       `;

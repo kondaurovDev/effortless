@@ -8,10 +8,7 @@ import * as S from "effect/Schema";
 
 type Session = { sid: string; userId: string; expiresAt: number };
 
-export const sessions = defineTable<Session>({
-  pk: { name: "sid", type: "string" },
-  ttlAttribute: "expiresAt",
-});
+export const sessions = defineTable<Session>({});
 
 // ── GET /hello (with params) ─────────────────────────────────
 

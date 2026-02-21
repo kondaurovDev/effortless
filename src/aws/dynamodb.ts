@@ -4,19 +4,11 @@ import { dynamodb, lambda } from "./clients";
 import { toAwsTagList } from "./tags";
 
 // Types from define-table (duplicated to avoid circular dependency)
-export type KeyType = "string" | "number" | "binary";
 export type StreamView = "NEW_IMAGE" | "OLD_IMAGE" | "NEW_AND_OLD_IMAGES" | "KEYS_ONLY";
 export type BillingMode = "PAY_PER_REQUEST" | "PROVISIONED";
-export type KeyDefinition = { name: string; type: KeyType };
 
-const keyTypeToDynamoDB = (type: KeyType): "S" | "N" | "B" => {
-  switch (type) {
-    case "string": return "S";
-    case "number": return "N";
-    case "binary": return "B";
-    default: return type satisfies never;
-  }
-};
+/** Built-in GSI: tag (PK) + pk (SK) — enables cross-partition queries by entity type */
+export const GSI_TAG_PK = "tag-pk-index";
 
 const streamViewToSpec = (view: StreamView) => ({
   StreamEnabled: true,
@@ -25,12 +17,9 @@ const streamViewToSpec = (view: StreamView) => ({
 
 export type EnsureTableInput = {
   name: string;
-  pk: KeyDefinition;
-  sk?: KeyDefinition;
   billingMode?: BillingMode;
   streamView?: StreamView;
   tags?: Record<string, string>;
-  ttlAttribute?: string;
 };
 
 export type EnsureTableResult = {
@@ -87,7 +76,7 @@ const ensureTimeToLive = (tableName: string, attributeName: string) =>
 
 export const ensureTable = (input: EnsureTableInput) =>
   Effect.gen(function* () {
-    const { name, pk, sk, billingMode = "PAY_PER_REQUEST", streamView = "NEW_AND_OLD_IMAGES", tags, ttlAttribute } = input;
+    const { name, billingMode = "PAY_PER_REQUEST", streamView = "NEW_AND_OLD_IMAGES", tags } = input;
 
     const existingTable = yield* dynamodb.make("describe_table", { TableName: name }).pipe(
       Effect.map(result => result.Table),
@@ -102,22 +91,25 @@ export const ensureTable = (input: EnsureTableInput) =>
     if (!existingTable) {
       yield* Effect.logInfo(`Creating table ${name}...`);
 
-      const keySchema: Array<{ AttributeName: string; KeyType: "HASH" | "RANGE" }> = [
-        { AttributeName: pk.name, KeyType: "HASH" }
-      ];
-      const attributeDefinitions: Array<{ AttributeName: string; AttributeType: "S" | "N" | "B" }> = [
-        { AttributeName: pk.name, AttributeType: keyTypeToDynamoDB(pk.type) }
-      ];
-
-      if (sk) {
-        keySchema.push({ AttributeName: sk.name, KeyType: "RANGE" });
-        attributeDefinitions.push({ AttributeName: sk.name, AttributeType: keyTypeToDynamoDB(sk.type) });
-      }
-
       yield* dynamodb.make("create_table", {
         TableName: name,
-        KeySchema: keySchema,
-        AttributeDefinitions: attributeDefinitions,
+        KeySchema: [
+          { AttributeName: "pk", KeyType: "HASH" },
+          { AttributeName: "sk", KeyType: "RANGE" },
+        ],
+        AttributeDefinitions: [
+          { AttributeName: "pk", AttributeType: "S" },
+          { AttributeName: "sk", AttributeType: "S" },
+          { AttributeName: "tag", AttributeType: "S" },
+        ],
+        GlobalSecondaryIndexes: [{
+          IndexName: GSI_TAG_PK,
+          KeySchema: [
+            { AttributeName: "tag", KeyType: "HASH" },
+            { AttributeName: "pk", KeyType: "RANGE" },
+          ],
+          Projection: { ProjectionType: "ALL" },
+        }],
         BillingMode: billingMode,
         StreamSpecification: streamViewToSpec(streamView),
         Tags: tags ? toAwsTagList(tags) : undefined
@@ -145,22 +137,46 @@ export const ensureTable = (input: EnsureTableInput) =>
           TableName: name,
           StreamSpecification: streamViewToSpec(streamView)
         });
-        const table = yield* waitForTableActive(name);
-        result = {
-          tableArn: table!.TableArn!,
-          streamArn: table!.LatestStreamArn!
-        };
-      } else {
-        result = {
-          tableArn: existingTable.TableArn!,
-          streamArn: existingTable.LatestStreamArn!
-        };
+        yield* waitForTableActive(name);
       }
+
+      // Ensure GSI exists on existing table
+      const hasGsi = existingTable.GlobalSecondaryIndexes?.some(
+        gsi => gsi.IndexName === GSI_TAG_PK
+      );
+      if (!hasGsi) {
+        yield* Effect.logInfo(`Adding GSI ${GSI_TAG_PK} to table ${name}...`);
+        yield* dynamodb.make("update_table", {
+          TableName: name,
+          AttributeDefinitions: [
+            { AttributeName: "pk", AttributeType: "S" },
+            { AttributeName: "sk", AttributeType: "S" },
+            { AttributeName: "tag", AttributeType: "S" },
+          ],
+          GlobalSecondaryIndexUpdates: [{
+            Create: {
+              IndexName: GSI_TAG_PK,
+              KeySchema: [
+                { AttributeName: "tag", KeyType: "HASH" },
+                { AttributeName: "pk", KeyType: "RANGE" },
+              ],
+              Projection: { ProjectionType: "ALL" },
+            }
+          }],
+        });
+        yield* waitForTableActive(name);
+      }
+
+      // Re-describe to get latest ARNs after potential updates
+      const updated = yield* dynamodb.make("describe_table", { TableName: name });
+      result = {
+        tableArn: updated.Table!.TableArn!,
+        streamArn: updated.Table!.LatestStreamArn!
+      };
     }
 
-    if (ttlAttribute) {
-      yield* ensureTimeToLive(name, ttlAttribute);
-    }
+    // Always enable TTL on the "ttl" attribute (zero-cost when unused)
+    yield* ensureTimeToLive(name, "ttl");
 
     return result;
   });

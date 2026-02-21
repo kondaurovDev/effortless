@@ -111,6 +111,47 @@ export function param<T = string>(
   } as ParamRef<T>;
 }
 
+// ============ Single-table types ============
+
+/**
+ * DynamoDB table key (always pk + sk strings in single-table design).
+ */
+export type TableKey = { pk: string; sk: string };
+
+/**
+ * Full DynamoDB item in the single-table design.
+ *
+ * Every item has a fixed envelope: `pk`, `sk`, `tag`, `data`, and optional `ttl`.
+ * `tag` is stored as a top-level DynamoDB attribute (GSI-ready).
+ * If your domain type `T` includes a `tag` field, effortless auto-copies
+ * `data.tag` to the top-level `tag` on `put()`, so you don't have to pass it twice.
+ *
+ * @typeParam T - The domain data type stored in the `data` attribute
+ */
+export type TableItem<T> = {
+  pk: string;
+  sk: string;
+  tag: string;
+  data: T;
+  ttl?: number;
+};
+
+/**
+ * Input type for `TableClient.put()`.
+ *
+ * Unlike `TableItem<T>`, this does NOT include `tag` — effortless auto-extracts
+ * the top-level DynamoDB `tag` attribute from your data using the configured
+ * tag field (defaults to `data.tag`, configurable via `defineTable({ tag: "type" })`).
+ *
+ * @typeParam T - The domain data type stored in the `data` attribute
+ */
+export type PutInput<T> = {
+  pk: string;
+  sk: string;
+  data: T;
+  ttl?: number;
+};
+
 // ============ Typed helper ============
 
 /**
@@ -128,12 +169,7 @@ export function param<T = string>(
  * ```typescript
  * type User = { id: string; email: string };
  *
- * // Before (breaks inference for setup, deps, config):
- * export const users = defineTable<User>({ pk: { name: "id", type: "string" } });
- *
- * // After (all generics inferred correctly):
  * export const users = defineTable({
- *   pk: { name: "id", type: "string" },
  *   schema: typed<User>(),
  * });
  * ```
@@ -141,11 +177,10 @@ export function param<T = string>(
  * @example Table with stream handler
  * ```typescript
  * export const orders = defineTable({
- *   pk: { name: "id", type: "string" },
  *   schema: typed<Order>(),
  *   setup: async () => ({ db: createClient() }),
  *   onRecord: async ({ record, ctx }) => {
- *     // record.new is Order, ctx is { db: Client } — all inferred
+ *     // record.new.data is Order, ctx is { db: Client } — all inferred
  *   },
  * });
  * ```

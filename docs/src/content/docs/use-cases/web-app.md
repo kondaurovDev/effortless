@@ -158,6 +158,63 @@ export const app = defineStaticSite({
 
 Behind the scenes, CloudFront returns `index.html` for any path that doesn't match a real file (via custom error response for 403/404).
 
+### Middleware — protect pages with auth
+
+Some sections of your site shouldn't be public. An admin panel, internal docs, a paid content area — you need to check authentication before serving the page.
+
+`middleware` lets you run custom Node.js code at the edge before CloudFront serves any file. If the check fails — redirect to login or block access. If it passes — the page is served normally.
+
+```typescript
+export const admin = defineStaticSite({
+  dir: "admin/dist",
+  domain: "admin.example.com",
+  build: "npm run build",
+  middleware: async (request) => {
+    // Check for session cookie
+    if (!request.cookies.session) {
+      return { redirect: "https://example.com/login" };
+    }
+
+    // Optionally verify the token
+    const isValid = verifyJWT(request.cookies.session);
+    if (!isValid) {
+      return { status: 403, body: "Access denied" };
+    }
+
+    // No return → serve the page
+  },
+});
+```
+
+The middleware receives a simplified request with `uri`, `method`, `querystring`, `headers`, and `cookies`. Return nothing to serve the page, `{ redirect: url }` to redirect, or `{ status: 403 }` to block.
+
+This runs as Lambda@Edge — full Node.js runtime, so you can validate JWTs, call external APIs, check databases. It's deployed to us-east-1 and replicated to all CloudFront edge locations worldwide.
+
+When middleware is set, it replaces the default CloudFront Function. URL rewriting (`/path/` → `/path/index.html`) is handled automatically inside the middleware wrapper.
+
+**A common pattern** — separate public and protected sites into different domains:
+
+```typescript
+// Public landing — fast, no middleware overhead
+export const landing = defineStaticSite({
+  dir: "landing/dist",
+  domain: "example.com",
+});
+
+// Protected admin — with JWT validation
+export const admin = defineStaticSite({
+  dir: "admin/dist",
+  domain: "admin.example.com",
+  middleware: async (request) => {
+    if (!request.cookies.session) {
+      return { redirect: "https://example.com/login" };
+    }
+  },
+});
+```
+
+Each `defineStaticSite` creates its own CloudFront distribution, so there's no performance penalty for the public site.
+
 ---
 
 ## Which one to choose?
@@ -168,13 +225,14 @@ Behind the scenes, CloudFront returns `index.html` for any path that doesn't mat
 | Global CDN | No | Yes |
 | Custom domain | No (uses API Gateway URL) | Yes (`domain` option) |
 | www redirect | No | Automatic (when cert covers www) |
+| Edge auth/middleware | No | Yes (`middleware` option — Lambda@Edge) |
 | Same domain as API | Yes | No (separate CloudFront URL) |
 | Extra AWS resources | None | S3 bucket + CloudFront distribution |
-| Best for | Internal tools, admin panels, fullstack apps | Public sites, blogs, docs, marketing pages |
+| Best for | Internal tools, fullstack apps | Public sites, docs, protected admin panels |
 
 **Rule of thumb**: if your site lives alongside API handlers — use `defineApp`. If it's a standalone public site that needs CDN performance — use `defineStaticSite`.
 
 ## See also
 
 - [Definitions reference — defineApp](/definitions/#defineapp) — all configuration options
-- [Definitions reference — defineStaticSite](/definitions/#definestaticsite) — all configuration options
+- [Definitions reference — defineStaticSite](/definitions/#definestaticsite) — all configuration options including middleware

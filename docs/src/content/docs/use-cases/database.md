@@ -1,29 +1,113 @@
 ---
 title: Database
-description: Create DynamoDB tables with defineTable — typed clients, stream processing, and event-driven workflows.
+description: Create DynamoDB tables with defineTable — single-table design, typed clients, stream processing, and event-driven workflows.
 ---
 
 You need a database for your serverless app. [DynamoDB](/why-aws/#dynamodb) is a fully managed database with single-digit millisecond latency, automatic replication across availability zones, and a built-in streaming feature that turns every write into a real-time event.
 
-The usual pain with DynamoDB isn't the service itself — it's the setup. CloudFormation templates, IAM policies, event source mappings, environment variable wiring. With `defineTable` you declare the table shape once, and get a typed client, stream processing, and automatic IAM wiring — all from a single export.
+The usual pain with DynamoDB isn't the service itself — it's the setup. CloudFormation templates, IAM policies, event source mappings, environment variable wiring, and the boilerplate of single-table design. With `defineTable` you declare the table once, and get a typed client, stream processing, and automatic IAM wiring — all from a single export.
+
+## Single-table design
+
+Effortless enforces an opinionated **single-table design**. Every table has a fixed structure:
+
+| Attribute | Type | Purpose |
+|-----------|------|---------|
+| `pk` | String | Partition key — identifies the entity or group |
+| `sk` | String | Sort key — identifies the specific item or relationship |
+| `tag` | String | Entity type discriminant (auto-managed) |
+| `data` | Map | Your domain data (`T`) |
+| `ttl` | Number | Optional TTL timestamp for auto-expiration |
+
+You define your domain type `T` — that's what goes inside `data`. The envelope (`pk`, `sk`, `tag`, `ttl`) is managed by effortless. This structure enables flexible access patterns, multiple entity types in one table, and typed clients without raw SDK calls.
 
 ## A simple table
 
-You have users and you want to store them in DynamoDB. Define the table with a type and a primary key.
+You have users and you want to store them in DynamoDB. Define the table with a type.
 
 ```typescript
 // src/users.ts
 import { defineTable, typed } from "effortless-aws";
 
-type User = { id: string; email: string; name: string; createdAt: string };
+type User = { tag: string; email: string; name: string; createdAt: string };
 
 export const users = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<User>(),
 });
 ```
 
-After deploy, you get a DynamoDB table named `{project}-{stage}-users` with `id` as the partition key. Other handlers can reference this table via `deps` and get a typed client for `.put()`, `.get()`, `.delete()`, and `.query()`.
+After deploy, you get a DynamoDB table named `{project}-{stage}-users`. Other handlers can reference this table via `deps` and get a typed client for `.put()`, `.get()`, `.delete()`, `.update()`, and `.query()`.
+
+## Writing and reading data
+
+The `TableClient` works with the single-table envelope: `pk`, `sk`, and `data`.
+
+```typescript
+// Write an item — tag is auto-extracted from data.tag
+await table.put({
+  pk: "USER#alice",
+  sk: "PROFILE",
+  data: { tag: "user", email: "alice@example.com", name: "Alice", createdAt: "2025-01-01" },
+});
+
+// Read it back
+const item = await table.get({ pk: "USER#alice", sk: "PROFILE" });
+// item.data.name → "Alice"
+// item.tag → "user" (auto-extracted from data.tag)
+
+// Delete it
+await table.delete({ pk: "USER#alice", sk: "PROFILE" });
+```
+
+The top-level `tag` attribute in DynamoDB is auto-extracted from your data — by default from `data.tag`. If your discriminant field has a different name (like `type` or `kind`), set `tagField`:
+
+```typescript
+type Order = { type: "order"; amount: number; status: string };
+
+export const orders = defineTable({
+  tagField: "type",  // → extracts data.type as the DynamoDB tag attribute
+  schema: typed<Order>(),
+});
+```
+
+## Multiple entity types
+
+The real power of single-table design is storing related entities together. Use composite keys (`pk` + `sk`) and a discriminant field to model relationships.
+
+```typescript
+type UserData = { tag: "user"; email: string; name: string };
+type OrderData = { tag: "order"; amount: number; status: string; createdAt: string };
+
+// Store user and their orders in the same table
+await table.put({
+  pk: "USER#alice", sk: "PROFILE",
+  data: { tag: "user", email: "alice@example.com", name: "Alice" },
+});
+
+await table.put({
+  pk: "USER#alice", sk: "ORDER#2025-001",
+  data: { tag: "order", amount: 99, status: "pending", createdAt: "2025-01-15" },
+});
+
+await table.put({
+  pk: "USER#alice", sk: "ORDER#2025-002",
+  data: { tag: "order", amount: 250, status: "shipped", createdAt: "2025-01-20" },
+});
+
+// Query all orders for a user
+const orders = await table.query({
+  pk: "USER#alice",
+  sk: { begins_with: "ORDER#" },
+});
+
+// Query with sorting and limit
+const recentOrders = await table.query({
+  pk: "USER#alice",
+  sk: { begins_with: "ORDER#" },
+  limit: 5,
+  scanIndexForward: false,  // newest first
+});
+```
 
 ## Reacting to data changes
 
@@ -35,17 +119,16 @@ Add `onRecord` and your function runs for every change.
 // src/orders.ts
 import { defineTable, typed } from "effortless-aws";
 
-type Order = { id: string; product: string; amount: number; status: string };
+type Order = { tag: string; product: string; amount: number; status: string };
 
 export const orders = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<Order>(),
   onRecord: async ({ record }) => {
-    if (record.eventName === "INSERT") {
-      console.log(`New order: ${record.new!.product} — $${record.new!.amount}`);
+    if (record.eventName === "INSERT" && record.new) {
+      console.log(`New order: ${record.new.data.product} — $${record.new.data.amount}`);
       // Send confirmation email, update analytics, notify warehouse...
     }
-    if (record.eventName === "MODIFY" && record.new!.status === "shipped") {
+    if (record.eventName === "MODIFY" && record.new?.data.status === "shipped") {
       // Send shipping notification
     }
     if (record.eventName === "REMOVE") {
@@ -55,10 +138,11 @@ export const orders = defineTable({
 });
 ```
 
-The `record` object is typed from your table type:
+The `record` follows the `TableItem<T>` structure:
 - `record.eventName` — `"INSERT"`, `"MODIFY"`, or `"REMOVE"`
-- `record.new` — the new item (typed as `Order | undefined`)
-- `record.old` — the previous item (typed as `Order | undefined`)
+- `record.new` — the new item as `TableItem<T>` (access domain data via `record.new.data`)
+- `record.old` — the previous item as `TableItem<T>`
+- `record.keys` — `{ pk: string; sk: string }`
 
 Effortless creates the DynamoDB stream, the Lambda function, and the event source mapping. If your handler throws, only that specific record is reported as a failure — other records in the batch still succeed (partial batch failure handling is built in).
 
@@ -72,16 +156,15 @@ Use `onBatch` to receive all records at once.
 // src/analytics.ts
 import { defineTable, typed } from "effortless-aws";
 
-type ClickEvent = { id: string; page: string; userId: string; timestamp: string };
+type ClickEvent = { tag: string; page: string; userId: string; timestamp: string };
 
 export const clickEvents = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<ClickEvent>(),
   batchSize: 100,
   onBatch: async ({ records }) => {
     const inserts = records
       .filter(r => r.eventName === "INSERT")
-      .map(r => r.new!);
+      .map(r => r.new!.data);
 
     if (inserts.length > 0) {
       await bulkIndexToElasticsearch(inserts);
@@ -94,16 +177,14 @@ You can also combine `onRecord` with `onBatchComplete` for a process-then-summar
 
 ```typescript
 export const payments = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<Payment>(),
   onRecord: async ({ record }) => {
-    // Process each payment individually
-    await processPayment(record.new!);
-    return { processed: true };
+    await processPayment(record.new!.data);
+    return { amount: record.new!.data.amount };
   },
   onBatchComplete: async ({ results, failures }) => {
-    // Runs after all records are processed
-    console.log(`Processed: ${results.length}, Failed: ${failures.length}`);
+    const total = results.reduce((sum, r) => sum + r.amount, 0);
+    console.log(`Processed: $${total}, Failed: ${failures.length}`);
     if (failures.length > 0) {
       await alertOnFailures(failures);
     }
@@ -111,30 +192,74 @@ export const payments = defineTable({
 });
 ```
 
-## Table with sort key and TTL
+## Updating without reading
 
-You need a table where items expire automatically — session tokens, cache entries, temporary data. Add a sort key for flexible queries and a TTL attribute for auto-expiration.
+You don't always need to read an item before updating it. The `update()` method lets you modify specific fields inside `data` directly — effortless auto-prefixes `data.` in the DynamoDB expression.
 
 ```typescript
-// src/sessions.ts
-import { defineTable, typed } from "effortless-aws";
+// Update domain data fields
+await table.update({ pk: "USER#alice", sk: "ORDER#2025-001" }, {
+  set: { status: "shipped" },
+});
 
-type Session = {
-  userId: string;
-  sessionId: string;
-  data: Record<string, unknown>;
-  ttl: number; // Unix timestamp
-};
+// Append to a list field
+await table.update({ pk: "USER#alice", sk: "ORDER#2025-001" }, {
+  append: { events: ["shipped"] },
+});
 
-export const sessions = defineTable({
-  pk: { name: "userId", type: "string" },
-  sk: { name: "sessionId", type: "string" },
-  ttlAttribute: "ttl",
-  schema: typed<Session>(),
+// Remove a field
+await table.update({ pk: "USER#alice", sk: "ORDER#2025-001" }, {
+  remove: ["tempNotes"],
+});
+
+// Update top-level tag and TTL
+await table.update({ pk: "USER#alice", sk: "ORDER#2025-001" }, {
+  set: { status: "archived" },
+  tag: "archived-order",
+  ttl: Math.floor(Date.now() / 1000) + 86400 * 30,  // expire in 30 days
 });
 ```
 
-DynamoDB automatically deletes items when the TTL timestamp passes. No cron jobs, no cleanup Lambda.
+## TTL (auto-expiration)
+
+TTL is always enabled on the `ttl` attribute. Set a Unix timestamp (in seconds) and DynamoDB automatically deletes the item after that time. No cron jobs, no cleanup Lambda.
+
+```typescript
+// Set TTL on put
+await table.put({
+  pk: "SESSION#abc", sk: "DATA",
+  data: { tag: "session", userId: "alice", token: "..." },
+  ttl: Math.floor(Date.now() / 1000) + 3600,  // expire in 1 hour
+});
+
+// Update TTL on an existing item
+await table.update({ pk: "SESSION#abc", sk: "DATA" }, {
+  ttl: Math.floor(Date.now() / 1000) + 7200,  // extend to 2 hours
+});
+
+// Remove TTL (item never expires)
+await table.update({ pk: "SESSION#abc", sk: "DATA" }, {
+  ttl: null,
+});
+```
+
+## Conditional writes
+
+Use `ifNotExists` to prevent overwriting existing items — useful for idempotent operations.
+
+```typescript
+try {
+  await table.put(
+    {
+      pk: "USER#alice", sk: "PROFILE",
+      data: { tag: "user", email: "alice@example.com", name: "Alice" },
+    },
+    { ifNotExists: true },
+  );
+} catch (err) {
+  // Item already exists — handle gracefully
+}
+```
 
 ## Using the table from another handler
 
@@ -143,24 +268,24 @@ The real power of `defineTable` is how it composes with other handlers. Any HTTP
 ```typescript
 // src/api.ts
 import { defineHttp } from "effortless-aws";
-import { sessions } from "./sessions";
+import { users } from "./users";
 
-export const getSession = defineHttp({
+export const getUser = defineHttp({
   method: "GET",
-  path: "/sessions/{userId}/{sessionId}",
-  deps: { sessions },
+  path: "/users/{id}",
+  deps: { users },
   onRequest: async ({ req, deps }) => {
-    const session = await deps.sessions.get({
-      userId: req.params.userId,
-      sessionId: req.params.sessionId,
+    const user = await deps.users.get({
+      pk: `USER#${req.params.id}`,
+      sk: "PROFILE",
     });
-    if (!session) return { status: 404, body: { error: "Session not found" } };
-    return { status: 200, body: session };
+    if (!user) return { status: 404, body: { error: "User not found" } };
+    return { status: 200, body: user.data };
   },
 });
 ```
 
-`deps.sessions.get()` knows the key shape (`userId` + `sessionId`) and the return type (`Session`). The Lambda gets IAM permissions for `GetItem` on that specific table. All wired automatically.
+`deps.users` is a `TableClient<User>` — typed from the table's schema. The Lambda gets IAM permissions for DynamoDB operations on that specific table, all wired automatically.
 
 ## Resource-only table
 
@@ -168,8 +293,6 @@ Sometimes you need a table but don't need stream processing — it's just a data
 
 ```typescript
 export const cache = defineTable({
-  pk: { name: "key", type: "string" },
-  ttlAttribute: "expiresAt",
   schema: typed<CacheEntry>(),
 });
 // No onRecord — just a table. Reference it with deps from other handlers.

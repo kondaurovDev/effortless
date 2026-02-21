@@ -30,6 +30,8 @@ export type LambdaConfig = {
   tags?: Record<string, string>;
   layers?: string[];
   environment?: Record<string, string>;
+  /** @default Architecture.arm64 */
+  architecture?: Architecture;
 };
 
 /**
@@ -55,6 +57,7 @@ export const ensureLambda = (
     const runtime = config.runtime ?? Runtime.nodejs24x;
     const layers = config.layers ?? [];
     const environment = config.environment ?? {};
+    const arch = config.architecture ?? Architecture.arm64;
 
     const existingFunction = yield* lambda.make("get_function", {
       FunctionName: functionName
@@ -79,7 +82,7 @@ export const ensureLambda = (
       const envChanged = envKeys.some(k => existingEnv[k] !== environment[k]);
 
       const existingArch = existingFunction.Architectures?.[0] ?? Architecture.x86_64;
-      const archChanged = existingArch !== Architecture.arm64;
+      const archChanged = existingArch !== arch;
 
       const configChanged =
         existingFunction.MemorySize !== memory ||
@@ -100,7 +103,7 @@ export const ensureLambda = (
         yield* lambda.make("update_function_code", {
           FunctionName: functionName,
           ZipFile: config.code,
-          Architectures: [Architecture.arm64]
+          Architectures: [arch]
         });
 
         yield* waitForFunctionActive(functionName);
@@ -152,7 +155,7 @@ export const ensureLambda = (
       },
       Handler: handler,
       Runtime: runtime,
-      Architectures: [Architecture.arm64],
+      Architectures: [arch],
       MemorySize: memory,
       Timeout: timeout,
       Tags: config.tags,
@@ -187,6 +190,18 @@ const waitForFunctionActive = (functionName: string) =>
     );
 
     yield* Effect.logDebug(`Function ${functionName} is active`);
+  });
+
+export const publishVersion = (functionName: string) =>
+  Effect.gen(function* () {
+    yield* Effect.logDebug(`Publishing version for: ${functionName}`);
+    const result = yield* lambda.make("publish_version", {
+      FunctionName: functionName,
+    });
+    return {
+      versionArn: result.FunctionArn!,
+      version: result.Version!,
+    };
   });
 
 export const deleteLambda = (functionName: string) =>

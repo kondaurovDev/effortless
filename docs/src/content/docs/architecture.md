@@ -149,7 +149,8 @@ export const createUser = defineHttp({
 
 ```
 RUNTIME_PROPS = ["onRequest", "onRecord", "onBatch", "onBatchComplete",
-                 "onMessage", "setup", "schema", "onError", "deps", "params", "static"]
+                 "onMessage", "setup", "schema", "onError", "deps", "config",
+                 "static", "middleware"]
 ```
 
 This static config is used by the **deploy phase** to configure AWS resources (API Gateway routes, Lambda memory/timeout, etc.) without needing to execute user code.
@@ -232,7 +233,7 @@ defineHttp({          ┌─► ts-morph extracts static config ─► deploy ph
 
 ## Three-Phase Pattern
 
-Every cross-cutting feature (deps, params, static files) follows the same three-phase pattern. Understanding this pattern once lets you understand — or build — any feature.
+Every cross-cutting feature (deps, config, static files) follows the same three-phase pattern. Understanding this pattern once lets you understand — or build — any feature.
 
 ```
 Build (ts-morph AST)        Deploy (Effect)              Runtime (Lambda)
@@ -251,9 +252,8 @@ reads config from AST       generates EFF_* env vars     reads env vars,
 | Feature | Build function | Extracted data | Deploy function | Env var pattern | Runtime function |
 |---------|---------------|----------------|-----------------|-----------------|------------------|
 | **deps** | `extractDepsKeys()` | `["orders", "users"]` | `resolveDeps()` | `EFF_TABLE_<key>=<tableName>` | `buildDeps()` → `TableClient` per key |
-| **params** | `extractParamEntries()` | `[{propName, ssmKey}]` | `resolveParams()` | `EFF_PARAM_<prop>=/<project>/<stage>/<ssmKey>` | `buildParams()` → batch SSM fetch + transform |
+| **config** | `extractParamEntries()` | `[{propName, ssmKey}]` | `resolveParams()` | `EFF_PARAM_<prop>=/<project>/<stage>/<ssmKey>` | `buildParams()` → batch SSM fetch + transform |
 | **static** | `extractStaticGlobs()` | `["src/templates/*.ejs"]` | `resolveStaticFiles()` | _(files bundled in ZIP)_ | `readStatic()` → `readFileSync` from cwd |
-| **platform** | _(always on)_ | — | `ensurePlatformTable()` | `EFF_PLATFORM_TABLE=<tableName>` | `createPlatformClient()` → fire-and-forget |
 
 All `resolve*` results are combined via `mergeResolved()` into a single `{ env, permissions }` payload before being passed to `deployCoreLambda()`.
 
@@ -269,7 +269,7 @@ Use `defineFifoQueue` as a template — it's the most recently added handler typ
 - Define config type with all static properties (name, memory, timeout, etc.)
 - Define callback function types
 - Export `define<Type>()` factory function
-- Thread generics: `<T, C, D, P, S>` for schema, setup, deps, params, static
+- Thread generics: `<T, C, D, P, S>` for schema, setup, deps, config, static
 
 ### Step 2: Handler registry (`build/handler-registry.ts`)
 
@@ -288,7 +288,7 @@ Use `defineFifoQueue` as a template — it's the most recently added handler typ
 
 - Export `wrap<Type>(handler)` function
 - Parse the incoming Lambda event into your handler's format
-- Call `createHandlerRuntime()` from `handler-utils.ts` to get shared functionality (setup, deps, params, platform logging)
+- Call `createHandlerRuntime()` from `handler-utils.ts` to get shared functionality (setup, deps, config, logging)
 - Call the user's callback with `rt.commonArgs()` + type-specific args
 - Format and return the Lambda response
 
@@ -313,7 +313,7 @@ Use `defineFifoQueue` as a template — it's the most recently added handler typ
 
 ## Adding a Cross-Cutting Feature
 
-Use `params` as a template — it's a clean example of the three-phase pattern.
+Use `config` (SSM params) as a template — it's a clean example of the three-phase pattern.
 
 ### Step 1: Build — AST extraction (`build/handler-registry.ts`)
 
@@ -374,7 +374,6 @@ All resources include project name and stage, ensuring no collisions:
 | API Gateway | `${project}-${stage}` |
 | DynamoDB table | `${project}-${stage}-${handler}` |
 | SQS FIFO queue | `${project}-${stage}-${handler}` |
-| Platform table | `${project}-${stage}-platform` |
 | Lambda layer | `${project}-${stage}-deps` |
 
 ### Stage isolation

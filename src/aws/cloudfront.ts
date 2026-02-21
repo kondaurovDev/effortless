@@ -152,6 +152,8 @@ export type EnsureDistributionInput = {
   index: string;
   tags: Record<string, string>;
   urlRewriteFunctionArn?: string;
+  /** Lambda@Edge versioned ARN for viewer-request (mutually exclusive with urlRewriteFunctionArn) */
+  lambdaEdgeArn?: string;
   aliases?: string[];
   acmCertificateArn?: string;
 };
@@ -167,7 +169,7 @@ const makeDistComment = (project: string, stage: string, handlerName: string) =>
 
 export const ensureDistribution = (input: EnsureDistributionInput) =>
   Effect.gen(function* () {
-    const { project, stage, handlerName, bucketName, bucketRegion, oacId, spa, index, tags, urlRewriteFunctionArn, aliases, acmCertificateArn } = input;
+    const { project, stage, handlerName, bucketName, bucketRegion, oacId, spa, index, tags, urlRewriteFunctionArn, lambdaEdgeArn, aliases, acmCertificateArn } = input;
     const aliasesConfig = aliases && aliases.length > 0
       ? { Quantity: aliases.length, Items: aliases }
       : { Quantity: 0, Items: [] as string[] };
@@ -178,8 +180,12 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
           MinimumProtocolVersion: "TLSv1.2_2021" as const,
         }
       : undefined;
-    const functionAssociations = urlRewriteFunctionArn
+    // CloudFront Functions and Lambda@Edge are mutually exclusive on viewer-request
+    const functionAssociations = (!lambdaEdgeArn && urlRewriteFunctionArn)
       ? { Quantity: 1, Items: [{ FunctionARN: urlRewriteFunctionArn, EventType: "viewer-request" as const }] }
+      : { Quantity: 0, Items: [] };
+    const lambdaFunctionAssociations = lambdaEdgeArn
+      ? { Quantity: 1, Items: [{ EventType: "viewer-request" as const, LambdaFunctionARN: lambdaEdgeArn, IncludeBody: false }] }
       : { Quantity: 0, Items: [] };
     const comment = makeDistComment(project, stage, handlerName);
     const originId = `S3-${bucketName}`;
@@ -227,6 +233,8 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
         desiredAliases.every(a => currentAliases.includes(a));
       const certMatch = currentConfig.ViewerCertificate?.ACMCertificateArn === (acmCertificateArn ?? undefined);
 
+      const currentLambdaEdgeArn = currentConfig.DefaultCacheBehavior?.LambdaFunctionAssociations?.Items?.[0]?.LambdaFunctionARN;
+
       const needsUpdate =
         currentOrigin?.DomainName !== originDomain ||
         currentOrigin?.OriginAccessControlId !== oacId ||
@@ -235,6 +243,8 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
         (currentConfig.CustomErrorResponses?.Quantity ?? 0) !== customErrorResponses.Quantity ||
         (currentConfig.DefaultCacheBehavior?.FunctionAssociations?.Quantity ?? 0) !== functionAssociations.Quantity ||
         currentConfig.DefaultCacheBehavior?.FunctionAssociations?.Items?.[0]?.FunctionARN !== (urlRewriteFunctionArn ?? undefined) ||
+        (currentConfig.DefaultCacheBehavior?.LambdaFunctionAssociations?.Quantity ?? 0) !== lambdaFunctionAssociations.Quantity ||
+        currentLambdaEdgeArn !== (lambdaEdgeArn ?? undefined) ||
         !aliasesMatch ||
         !certMatch;
 
@@ -273,6 +283,7 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
               Compress: true,
               CachePolicyId: CACHING_OPTIMIZED_POLICY_ID,
               FunctionAssociations: functionAssociations,
+              LambdaFunctionAssociations: lambdaFunctionAssociations,
               ForwardedValues: undefined,
             },
             Aliases: aliasesConfig,
@@ -328,6 +339,7 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
             Compress: true,
             CachePolicyId: CACHING_OPTIMIZED_POLICY_ID,
             FunctionAssociations: functionAssociations,
+            LambdaFunctionAssociations: lambdaFunctionAssociations,
           },
           Aliases: aliasesConfig,
           ...(viewerCertificate ? { ViewerCertificate: viewerCertificate } : {}),

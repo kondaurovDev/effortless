@@ -70,17 +70,16 @@ The `data` argument is typed from your schema. Send `{ "email": 123 }` and the c
 
 Most APIs need a database. Traditionally that means: create a DynamoDB table in CloudFormation, configure IAM permissions for the Lambda to access it, pass the table name via environment variables, instantiate the DynamoDB client, and write untyped SDK calls.
 
-With Effortless, you define the table and reference it in your HTTP handler via `deps`. The framework wires everything — table name, IAM permissions, typed client.
+With Effortless, you define the table and reference it in your HTTP handler via `deps`. The framework wires everything — table name, IAM permissions, typed client. Tables use a [single-table design](/use-cases/database/) with a fixed envelope: `pk`, `sk`, `tag`, `data`, and optional `ttl`.
 
 ```typescript
 // src/tasks.ts
 import { defineTable, defineHttp, typed } from "effortless-aws";
 import { Schema } from "effect";
 
-type Task = { id: string; title: string; done: boolean; createdAt: string };
+type Task = { tag: string; title: string; done: boolean; createdAt: string };
 
 export const tasks = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<Task>(),
 });
 
@@ -91,14 +90,13 @@ export const createTask = defineHttp({
   schema: Schema.Struct({ title: Schema.String }),
   deps: { tasks },
   onRequest: async ({ data, deps }) => {
-    const task: Task = {
-      id: crypto.randomUUID(),
-      title: data.title,
-      done: false,
-      createdAt: new Date().toISOString(),
-    };
-    await deps.tasks.put(task);
-    return { status: 201, body: task };
+    const id = crypto.randomUUID();
+    await deps.tasks.put({
+      pk: `TASK#${id}`,
+      sk: "DETAIL",
+      data: { tag: "task", title: data.title, done: false, createdAt: new Date().toISOString() },
+    });
+    return { status: 201, body: { id, title: data.title } };
   },
 });
 
@@ -108,9 +106,9 @@ export const getTask = defineHttp({
   path: "/tasks/{id}",
   deps: { tasks },
   onRequest: async ({ req, deps }) => {
-    const task = await deps.tasks.get({ id: req.params.id });
-    if (!task) return { status: 404, body: { error: "Not found" } };
-    return { status: 200, body: task };
+    const item = await deps.tasks.get({ pk: `TASK#${req.params.id}`, sk: "DETAIL" });
+    if (!item) return { status: 404, body: { error: "Not found" } };
+    return { status: 200, body: { id: req.params.id, ...item.data } };
   },
 });
 
@@ -120,7 +118,7 @@ export const deleteTask = defineHttp({
   path: "/tasks/{id}",
   deps: { tasks },
   onRequest: async ({ req, deps }) => {
-    await deps.tasks.delete({ id: req.params.id });
+    await deps.tasks.delete({ pk: `TASK#${req.params.id}`, sk: "DETAIL" });
     return { status: 200, body: { ok: true } };
   },
 });
@@ -141,16 +139,16 @@ import { Schema } from "effect";
 export const checkout = defineHttp({
   method: "POST",
   path: "/checkout",
-  params: {
+  config: {
     stripeKey: param("stripe/secret-key"),
   },
   schema: Schema.Struct({
     amount: Schema.Number,
     currency: Schema.String,
   }),
-  onRequest: async ({ data, params }) => {
-    // params.stripeKey is fetched from SSM, cached across invocations
-    const stripe = new Stripe(params.stripeKey);
+  onRequest: async ({ data, config }) => {
+    // config.stripeKey is fetched from SSM, cached across invocations
+    const stripe = new Stripe(config.stripeKey);
     const intent = await stripe.paymentIntents.create({
       amount: data.amount,
       currency: data.currency,

@@ -6,18 +6,33 @@ import { importBundle } from "./helpers/bundle-code"
 
 const projectDir = path.resolve(__dirname, "..")
 
+// Helper to create a DynamoDB stream record in single-table format
+const makeRecord = (overrides: { pk?: string; sk?: string; tag?: string; data?: Record<string, unknown>; seq?: string; eventName?: string } = {}) => ({
+  eventName: overrides.eventName ?? "INSERT",
+  dynamodb: {
+    Keys: { pk: { S: overrides.pk ?? "PK#1" }, sk: { S: overrides.sk ?? "SK#1" } },
+    NewImage: {
+      pk: { S: overrides.pk ?? "PK#1" },
+      sk: { S: overrides.sk ?? "SK#1" },
+      tag: { S: overrides.tag ?? "test" },
+      data: { M: Object.fromEntries(
+        Object.entries(overrides.data ?? { name: "Alice" }).map(([k, v]) => [k, typeof v === "number" ? { N: String(v) } : { S: String(v) }])
+      )},
+    },
+    SequenceNumber: overrides.seq ?? "100",
+  },
+});
+
 describe("defineTable", () => {
 
   describe("config extraction", () => {
 
-    it("should extract config from named export", () => {
+    it("should extract config from named export (no pk/sk needed)", () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
         export const orders = defineTable({
           name: "orders",
-          pk: { name: "id", type: "string" },
-          sk: { name: "createdAt", type: "number" },
           streamView: "NEW_AND_OLD_IMAGES",
           batchSize: 50,
           memory: 512,
@@ -33,12 +48,13 @@ describe("defineTable", () => {
       const first = configs[0]!;
       expect(first.exportName).toBe("orders");
       expect(first.config.name).toBe("orders");
-      expect(first.config.pk).toEqual({ name: "id", type: "string" });
-      expect(first.config.sk).toEqual({ name: "createdAt", type: "number" });
       expect(first.config.streamView).toBe("NEW_AND_OLD_IMAGES");
       expect(first.config.batchSize).toBe(50);
       expect(first.config.memory).toBe(512);
       expect(first.hasHandler).toBe(true);
+      // pk/sk should not be in config
+      expect((first.config as any).pk).toBeUndefined();
+      expect((first.config as any).sk).toBeUndefined();
     });
 
     it("should extract config from default export", () => {
@@ -47,7 +63,6 @@ describe("defineTable", () => {
 
         export default defineTable({
           name: "users",
-          pk: { name: "userId", type: "string" },
           onRecord: async ({ record }) => {}
         });
       `;
@@ -58,7 +73,6 @@ describe("defineTable", () => {
       const first = configs[0]!;
       expect(first.exportName).toBe("default");
       expect(first.config.name).toBe("users");
-      expect(first.config.pk).toEqual({ name: "userId", type: "string" });
       expect(first.hasHandler).toBe(true);
     });
 
@@ -68,7 +82,6 @@ describe("defineTable", () => {
 
         export const users = defineTable({
           name: "users",
-          pk: { name: "userId", type: "string" }
         });
       `;
 
@@ -84,7 +97,6 @@ describe("defineTable", () => {
 
         export const events = defineTable({
           name: "events",
-          pk: { name: "id", type: "string" },
           onBatch: async ({ records }) => {
             console.log(records);
           }
@@ -103,14 +115,11 @@ describe("defineTable", () => {
 
         export const orders = defineTable({
           name: "orders",
-          pk: { name: "id", type: "string" },
           onRecord: async ({ record }) => {}
         });
 
         export const users = defineTable({
           name: "users",
-          pk: { name: "userId", type: "string" },
-          sk: { name: "email", type: "string" },
           onRecord: async ({ record }) => {}
         });
       `;
@@ -126,7 +135,7 @@ describe("defineTable", () => {
 
   describe("onRecord", () => {
 
-    it("should bundle and invoke handler", async () => {
+    it("should bundle and invoke handler with single-table record", async () => {
       const handlerCode = `
         import { defineTable } from "./src/handlers/define-table";
 
@@ -134,9 +143,8 @@ describe("defineTable", () => {
 
         export default defineTable({
           name: "orders",
-          pk: { name: "id", type: "string" },
           onRecord: async ({ record }) => {
-            globalThis.__test_onRecord.push(record.new?.name);
+            globalThis.__test_onRecord.push(record.new?.data?.name);
           }
         });
       `;
@@ -145,22 +153,8 @@ describe("defineTable", () => {
 
       const response = await mod.handler({
         Records: [
-          {
-            eventName: "INSERT",
-            dynamodb: {
-              Keys: { id: { S: "1" } },
-              NewImage: { id: { S: "1" }, name: { S: "Alice" } },
-              SequenceNumber: "100",
-            },
-          },
-          {
-            eventName: "INSERT",
-            dynamodb: {
-              Keys: { id: { S: "2" } },
-              NewImage: { id: { S: "2" }, name: { S: "Bob" } },
-              SequenceNumber: "200",
-            },
-          },
+          makeRecord({ pk: "USER#1", sk: "ORDER#1", tag: "order", data: { name: "Alice" }, seq: "100" }),
+          makeRecord({ pk: "USER#1", sk: "ORDER#2", tag: "order", data: { name: "Bob" }, seq: "200" }),
         ],
       });
 
@@ -176,8 +170,7 @@ describe("defineTable", () => {
 
         export default defineTable({
           name: "orders",
-          pk: { name: "id", type: "string" },
-          setup: () => ({ runtime: "mock-runtime" }),
+          setup: ({ table }) => ({ runtime: "mock-runtime" }),
           onRecord: async ({ record, ctx }) => {
             globalThis.__test_ctx.push(ctx.runtime);
           }
@@ -187,16 +180,7 @@ describe("defineTable", () => {
       const mod = await importBundle({ code: handlerCode, projectDir, type: "table" });
 
       const response = await mod.handler({
-        Records: [
-          {
-            eventName: "INSERT",
-            dynamodb: {
-              Keys: { id: { S: "1" } },
-              NewImage: { id: { S: "1" } },
-              SequenceNumber: "100",
-            },
-          },
-        ],
+        Records: [makeRecord()],
       });
 
       expect(response.batchItemFailures).toEqual([]);
@@ -215,9 +199,8 @@ describe("defineTable", () => {
 
         export default defineTable({
           name: "events",
-          pk: { name: "id", type: "string" },
           onBatch: async ({ records }) => {
-            globalThis.__test_onBatch.push(...records.map(r => r.new?.name));
+            globalThis.__test_onBatch.push(...records.map(r => r.new?.data?.name));
           }
         });
       `;
@@ -226,22 +209,8 @@ describe("defineTable", () => {
 
       const response = await mod.handler({
         Records: [
-          {
-            eventName: "INSERT",
-            dynamodb: {
-              Keys: { id: { S: "1" } },
-              NewImage: { id: { S: "1" }, name: { S: "Alice" } },
-              SequenceNumber: "100",
-            },
-          },
-          {
-            eventName: "INSERT",
-            dynamodb: {
-              Keys: { id: { S: "2" } },
-              NewImage: { id: { S: "2" }, name: { S: "Bob" } },
-              SequenceNumber: "200",
-            },
-          },
+          makeRecord({ data: { name: "Alice" }, seq: "100" }),
+          makeRecord({ data: { name: "Bob" }, seq: "200" }),
         ],
       });
 
@@ -257,7 +226,6 @@ describe("defineTable", () => {
 
         export default defineTable({
           name: "events",
-          pk: { name: "id", type: "string" },
           onError: (error) => {
             globalThis.__test_onBatchError.push(error.message);
           },
@@ -271,22 +239,8 @@ describe("defineTable", () => {
 
       const response = await mod.handler({
         Records: [
-          {
-            eventName: "INSERT",
-            dynamodb: {
-              Keys: { id: { S: "1" } },
-              NewImage: { id: { S: "1" } },
-              SequenceNumber: "100",
-            },
-          },
-          {
-            eventName: "INSERT",
-            dynamodb: {
-              Keys: { id: { S: "2" } },
-              NewImage: { id: { S: "2" } },
-              SequenceNumber: "200",
-            },
-          },
+          makeRecord({ seq: "100" }),
+          makeRecord({ seq: "200" }),
         ],
       });
 
@@ -301,23 +255,21 @@ describe("defineTable", () => {
 
   describe("schema", () => {
 
-    it("should decode records through schema function", async () => {
+    it("should decode data portion through schema function", async () => {
       const handlerCode = `
         import { defineTable } from "./src/handlers/define-table";
 
         globalThis.__test_schema = [];
 
-        const decodeUser = (input) => ({
-          id: String(input.id),
+        const decodeData = (input) => ({
           name: String(input.name).toUpperCase(),
         });
 
         export default defineTable({
           name: "users",
-          pk: { name: "id", type: "string" },
-          schema: decodeUser,
+          schema: decodeData,
           onRecord: async ({ record }) => {
-            globalThis.__test_schema.push(record.new);
+            globalThis.__test_schema.push(record.new?.data);
           }
         });
       `;
@@ -325,41 +277,30 @@ describe("defineTable", () => {
       const mod = await importBundle({ code: handlerCode, projectDir, type: "table" });
 
       const response = await mod.handler({
-        Records: [
-          {
-            eventName: "INSERT",
-            dynamodb: {
-              Keys: { id: { S: "1" } },
-              NewImage: { id: { S: "1" }, name: { S: "alice" } },
-              SequenceNumber: "100",
-            },
-          },
-        ],
+        Records: [makeRecord({ data: { name: "alice" } })],
       });
 
       expect(response.batchItemFailures).toEqual([]);
       expect((globalThis as any).__test_schema).toEqual([
-        { id: "1", name: "ALICE" },
+        { name: "ALICE" },
       ]);
     });
 
-    it("should decode records in onBatch through schema function", async () => {
+    it("should decode data in onBatch through schema function", async () => {
       const handlerCode = `
         import { defineTable } from "./src/handlers/define-table";
 
         globalThis.__test_batchSchema = [];
 
         const decodeItem = (input) => ({
-          id: String(input.id),
           value: Number(input.value) * 2,
         });
 
         export default defineTable({
           name: "items",
-          pk: { name: "id", type: "string" },
           schema: decodeItem,
           onBatch: async ({ records }) => {
-            globalThis.__test_batchSchema.push(...records.map(r => r.new));
+            globalThis.__test_batchSchema.push(...records.map(r => r.new?.data));
           }
         });
       `;
@@ -368,29 +309,15 @@ describe("defineTable", () => {
 
       const response = await mod.handler({
         Records: [
-          {
-            eventName: "INSERT",
-            dynamodb: {
-              Keys: { id: { S: "1" } },
-              NewImage: { id: { S: "1" }, value: { N: "5" } },
-              SequenceNumber: "100",
-            },
-          },
-          {
-            eventName: "INSERT",
-            dynamodb: {
-              Keys: { id: { S: "2" } },
-              NewImage: { id: { S: "2" }, value: { N: "10" } },
-              SequenceNumber: "200",
-            },
-          },
+          makeRecord({ data: { value: "5" }, seq: "100" }),
+          makeRecord({ data: { value: "10" }, seq: "200" }),
         ],
       });
 
       expect(response.batchItemFailures).toEqual([]);
       expect((globalThis as any).__test_batchSchema).toEqual([
-        { id: "1", value: 10 },
-        { id: "2", value: 20 },
+        { value: 10 },
+        { value: 20 },
       ]);
     });
 
@@ -405,7 +332,6 @@ describe("defineTable", () => {
 
         export default defineTable({
           name: "strict",
-          pk: { name: "id", type: "string" },
           schema: strictDecode,
           onBatch: async ({ records }) => {}
         });
@@ -418,8 +344,8 @@ describe("defineTable", () => {
           {
             eventName: "INSERT",
             dynamodb: {
-              Keys: { id: { S: "1" } },
-              NewImage: { id: { S: "1" } },
+              Keys: { pk: { S: "PK#1" }, sk: { S: "SK#1" } },
+              NewImage: { pk: { S: "PK#1" }, sk: { S: "SK#1" }, tag: { S: "test" }, data: { M: {} } },
               SequenceNumber: "100",
             },
           },
@@ -441,6 +367,37 @@ describe("defineTable", () => {
       process.env = originalEnv;
     });
 
+    it("should pass table client to setup", async () => {
+      process.env = { ...originalEnv, EFF_TABLE_SELF: "test-project-dev-orders" };
+
+      const handlerCode = `
+        import { defineTable } from "./src/handlers/define-table";
+
+        globalThis.__test_setupTable = null;
+
+        export default defineTable({
+          name: "orders",
+          setup: ({ table }) => {
+            globalThis.__test_setupTable = {
+              tableName: table.tableName,
+              hasPut: typeof table.put === "function",
+            };
+            return { initialized: true };
+          },
+          onRecord: async ({ record, ctx }) => {}
+        });
+      `;
+
+      const mod = await importBundle({ code: handlerCode, projectDir, type: "table" });
+
+      await mod.handler({ Records: [makeRecord()] });
+
+      const result = (globalThis as any).__test_setupTable;
+      expect(result).not.toBeNull();
+      expect(result.tableName).toBe("test-project-dev-orders");
+      expect(result.hasPut).toBe(true);
+    });
+
     it("should pass table client to onRecord", async () => {
       process.env = { ...originalEnv, EFF_TABLE_SELF: "test-project-dev-orders" };
 
@@ -451,7 +408,6 @@ describe("defineTable", () => {
 
         export default defineTable({
           name: "orders",
-          pk: { name: "id", type: "string" },
           onRecord: async ({ record, table }) => {
             globalThis.__test_table.push({
               tableName: table.tableName,
@@ -463,18 +419,7 @@ describe("defineTable", () => {
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "table" });
 
-      const response = await mod.handler({
-        Records: [
-          {
-            eventName: "INSERT",
-            dynamodb: {
-              Keys: { id: { S: "1" } },
-              NewImage: { id: { S: "1" } },
-              SequenceNumber: "100",
-            },
-          },
-        ],
-      });
+      const response = await mod.handler({ Records: [makeRecord()] });
 
       expect(response.batchItemFailures).toEqual([]);
       const results = (globalThis as any).__test_table;
@@ -493,7 +438,6 @@ describe("defineTable", () => {
 
         export default defineTable({
           name: "events",
-          pk: { name: "id", type: "string" },
           onBatch: async ({ records, table }) => {
             globalThis.__test_batchTable = {
               tableName: table.tableName,
@@ -505,18 +449,7 @@ describe("defineTable", () => {
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "table" });
 
-      const response = await mod.handler({
-        Records: [
-          {
-            eventName: "INSERT",
-            dynamodb: {
-              Keys: { id: { S: "1" } },
-              NewImage: { id: { S: "1" } },
-              SequenceNumber: "100",
-            },
-          },
-        ],
-      });
+      const response = await mod.handler({ Records: [makeRecord()] });
 
       expect(response.batchItemFailures).toEqual([]);
       const result = (globalThis as any).__test_batchTable;

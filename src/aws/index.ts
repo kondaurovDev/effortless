@@ -1,14 +1,14 @@
 // Lambda
-export { ensureLambda, deleteLambda } from "./lambda";
+export { ensureLambda, deleteLambda, publishVersion } from "./lambda";
 export type { LambdaConfig, LambdaStatus } from "./lambda";
 
 // IAM
-export { ensureRole, deleteRole, listEffortlessRoles } from "./iam";
+export { ensureRole, ensureEdgeRole, deleteRole, listEffortlessRoles } from "./iam";
 export type { EffortlessRole } from "./iam";
 
 // DynamoDB
 export { ensureTable, deleteTable, ensureEventSourceMapping } from "./dynamodb";
-export type { EnsureTableInput, EnsureTableResult, EnsureEventSourceMappingInput, KeyType, StreamView } from "./dynamodb";
+export type { EnsureTableInput, EnsureTableResult, EnsureEventSourceMappingInput, StreamView } from "./dynamodb";
 
 // API Gateway
 export { ensureProjectApi, addRouteToApi, removeStaleRoutes, deleteApi } from "./apigateway";

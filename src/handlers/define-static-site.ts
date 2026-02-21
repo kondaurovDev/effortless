@@ -1,3 +1,32 @@
+/** Simplified request object passed to middleware */
+export type MiddlewareRequest = {
+  uri: string;
+  method: string;
+  querystring: string;
+  headers: Record<string, string>;
+  cookies: Record<string, string>;
+};
+
+/** Redirect the user to another URL */
+export type MiddlewareRedirect = {
+  redirect: string;
+  status?: 301 | 302 | 307 | 308;
+};
+
+/** Deny access with a 403 status */
+export type MiddlewareDeny = {
+  status: 403;
+  body?: string;
+};
+
+/** Middleware return type: redirect, deny, or void (continue serving) */
+export type MiddlewareResult = MiddlewareRedirect | MiddlewareDeny | void;
+
+/** Function that runs before serving static files via Lambda@Edge */
+export type MiddlewareHandler = (
+  request: MiddlewareRequest
+) => Promise<MiddlewareResult> | MiddlewareResult;
+
 /**
  * Configuration for a static site handler (S3 + CloudFront)
  */
@@ -14,6 +43,8 @@ export type StaticSiteConfig = {
   build?: string;
   /** Custom domain name (e.g., "effortless-aws.website"). Requires an ACM certificate in us-east-1. If the cert also covers www, a 301 redirect from www to non-www is set up automatically. */
   domain?: string;
+  /** Lambda@Edge middleware that runs before serving pages. Use for auth checks, redirects, etc. */
+  middleware?: MiddlewareHandler;
 };
 
 /**
@@ -45,6 +76,18 @@ export type StaticSiteHandler = {
  *   dir: "dist",
  *   spa: true,
  *   build: "npm run build",
+ * });
+ * ```
+ *
+ * @example Protected site with middleware (Lambda@Edge)
+ * ```typescript
+ * export const admin = defineStaticSite({
+ *   dir: "admin/dist",
+ *   middleware: async (request) => {
+ *     if (!request.cookies.session) {
+ *       return { redirect: "/login" };
+ *     }
+ *   },
  * });
  * ```
  */

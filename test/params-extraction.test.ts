@@ -145,7 +145,6 @@ describe("params extraction", () => {
 
         export const orders = defineTable({
           name: "orders",
-          pk: { name: "id", type: "string" },
           config: {
             webhookUrl: param("webhook-url"),
           },
@@ -167,7 +166,6 @@ describe("params extraction", () => {
 
         export const orders = defineTable({
           name: "orders",
-          pk: { name: "id", type: "string" },
           onRecord: async ({ record }) => {}
         });
       `;
@@ -184,7 +182,6 @@ describe("params extraction", () => {
 
         export const orders = defineTable({
           name: "orders",
-          pk: { name: "id", type: "string" },
           config: {
             webhookUrl: param("webhook-url"),
           },

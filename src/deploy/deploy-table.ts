@@ -46,8 +46,6 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
     const tableName = `${input.project}-${tagCtx.stage}-${handlerName}`;
     const { tableArn, streamArn } = yield* ensureTable({
       name: tableName,
-      pk: config.pk,
-      sk: config.sk,
       billingMode: config.billingMode ?? "PAY_PER_REQUEST",
       streamView: config.streamView ?? "NEW_AND_OLD_IMAGES",
       tags: makeTags(tagCtx, "dynamodb")

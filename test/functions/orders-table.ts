@@ -17,9 +17,7 @@ type OrderEvent =
   | { type: "order_cancelled"; orderId: string; lostRevenue: number; customerId: string };
 
 // Dep: customers table (resource-only)
-export const customers = defineTable<Customer>({
-  pk: { name: "customerId", type: "string" },
-});
+export const customers = defineTable<Customer>({});
 
 // Simulated external service
 const analyticsService = {
@@ -40,7 +38,6 @@ const notificationService = {
 
 export const orders = defineTable({
   name: "test-orders",
-  pk: { name: "id", type: "string" },
   streamView: "NEW_AND_OLD_IMAGES",
   batchSize: 10,
   memory: 256,
@@ -55,7 +52,9 @@ export const orders = defineTable({
   }),
 
   onRecord: async ({ record, deps, config, ctx }): Promise<OrderEvent | null> => {
-    const { eventName, old: oldOrder, new: newOrder } = record;
+    const { eventName } = record;
+    const newOrder = record.new?.data;
+    const oldOrder = record.old?.data;
 
     if (eventName === "INSERT" && newOrder) {
       // New order - track creation event

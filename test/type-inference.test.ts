@@ -5,6 +5,7 @@ import { param } from "~/deploy/shared";
 import type { HttpRequest } from "~/handlers/define-http";
 import type { TableRecord } from "~/handlers/define-table";
 import type { TableClient } from "~/runtime/table-client";
+import type { TableItem } from "~/helpers";
 
 // ── Type-level equality assertion (works with tsc --noEmit) ──
 
@@ -16,9 +17,7 @@ type Equal<A, B> =
 
 type User = { name: string; email: string };
 
-const usersTable = defineTable<User>({
-  pk: { name: "email", type: "string" },
-});
+const usersTable = defineTable<User>({});
 
 // ── defineHttp ────────────────────────────────────────────────
 
@@ -177,18 +176,15 @@ describe("defineHttp type inference", () => {
 describe("defineTable type inference", () => {
 
   it("resource-only — no onRecord/onBatch required", () => {
-    const table = defineTable<User>({
-      pk: { name: "email", type: "string" },
-    });
+    const table = defineTable<User>({});
     expectTypeOf(table.__brand).toEqualTypeOf<"effortless-table">();
   });
 
-  it("explicit generic → record.new is typed", () => {
+  it("explicit generic → record.new is TableItem<User>", () => {
     defineTable<User>({
-      pk: { name: "email", type: "string" },
       onRecord: async (args) => {
         type _rec = Expect<Equal<typeof args.record, TableRecord<User>>>;
-        type _new = Expect<Equal<typeof args.record.new, User | undefined>>;
+        type _new = Expect<Equal<typeof args.record.new, TableItem<User> | undefined>>;
         type _table = Expect<Equal<typeof args.table, TableClient<User>>>;
       },
     });
@@ -196,10 +192,9 @@ describe("defineTable type inference", () => {
 
   it("schema → T is inferred from schema return type", () => {
     defineTable({
-      pk: { name: "email", type: "string" },
       schema: (input): User => input as User,
       onRecord: async (args) => {
-        type _new = Expect<Equal<typeof args.record.new, User | undefined>>;
+        type _new = Expect<Equal<typeof args.record.new, TableItem<User> | undefined>>;
         type _table = Expect<Equal<typeof args.table, TableClient<User>>>;
       },
     });
@@ -207,7 +202,6 @@ describe("defineTable type inference", () => {
 
   it("onRecord with setup + deps + config (via schema)", () => {
     defineTable({
-      pk: { name: "email", type: "string" },
       schema: (input): User => input as User,
       setup: () => ({ notifier: "sns" as const }),
       deps: { usersTable },
@@ -222,7 +216,6 @@ describe("defineTable type inference", () => {
 
   it("onBatch → receives records array", () => {
     defineTable({
-      pk: { name: "email", type: "string" },
       schema: (input): User => input as User,
       onBatch: async (args) => {
         type _recs = Expect<Equal<typeof args.records, TableRecord<User>[]>>;
@@ -233,7 +226,6 @@ describe("defineTable type inference", () => {
 
   it("onRecord + onBatchComplete → R is inferred", () => {
     defineTable({
-      pk: { name: "email", type: "string" },
       schema: (input): User => input as User,
       onRecord: async (args) => {
         return { processed: args.record.eventName };
@@ -247,7 +239,6 @@ describe("defineTable type inference", () => {
 
   it("minimal onRecord — no ctx/deps/config/readStatic", () => {
     defineTable<User>({
-      pk: { name: "email", type: "string" },
       onRecord: async (args) => {
         // @ts-expect-error — no ctx without setup
         args.ctx;
@@ -263,7 +254,6 @@ describe("defineTable type inference", () => {
 
   it("static → readStatic is present on onRecord", () => {
     defineTable({
-      pk: { name: "email", type: "string" },
       schema: (input): User => input as User,
       static: ["templates/*.html"],
       onRecord: async (args) => {
