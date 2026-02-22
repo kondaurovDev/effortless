@@ -186,8 +186,7 @@ const buildTableNameMap = (
   const map = new Map<string, string>();
   for (const { exports } of tableHandlers) {
     for (const fn of exports) {
-      const handlerName = fn.config.name ?? fn.exportName;
-      map.set(fn.exportName, `${project}-${stage}-${handlerName}`);
+      map.set(fn.exportName, `${project}-${stage}-${fn.name}`);
     }
   }
   return map;
@@ -305,7 +304,7 @@ const buildHttpTasks = (
       tasks.push(
         Effect.gen(function* () {
           const env = resolveHandlerEnv(fn.depsKeys, fn.paramEntries, ctx);
-          const { exportName, functionArn, status, config } = yield* deployLambda({
+          const { exportName, functionArn, status, config, handlerName } = yield* deployLambda({
             input: makeDeployInput(ctx, file), fn,
             ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
             ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
@@ -318,7 +317,7 @@ const buildHttpTasks = (
           }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, apigatewayv2: { region } })));
 
           results.push({ exportName, url: handlerUrl, functionArn });
-          yield* ctx.logComplete( config.name ?? exportName, "http", status);
+          yield* ctx.logComplete( handlerName, "http", status);
         })
       );
     }
@@ -346,7 +345,7 @@ const buildTableTasks = (
             ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
           }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region }, dynamodb: { region } })));
           results.push(result);
-          yield* ctx.logComplete( fn.config.name ?? fn.exportName, "table", result.status);
+          yield* ctx.logComplete( fn.name, "table", result.status);
         })
       );
     }
@@ -416,7 +415,7 @@ const buildStaticSiteTasks = (
             acm: { region: "us-east-1" },
           })));
           results.push(result);
-          yield* ctx.logComplete( fn.config.name ?? fn.exportName, "site", "updated");
+          yield* ctx.logComplete( fn.name, "site", "updated");
         })
       );
     }
@@ -444,7 +443,7 @@ const buildFifoQueueTasks = (
             ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
           }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region }, sqs: { region } })));
           results.push(result);
-          yield* ctx.logComplete( fn.config.name ?? fn.exportName, "queue", result.status);
+          yield* ctx.logComplete( fn.name, "queue", result.status);
         })
       );
     }
@@ -573,15 +572,15 @@ export const deployProject = (input: DeployProjectInput) =>
     // Build handler manifest and live progress tracker
     const manifest: HandlerManifest = [];
     for (const { exports } of httpHandlers)
-      for (const fn of exports) manifest.push({ name: fn.config.name ?? fn.exportName, type: "http" });
+      for (const fn of exports) manifest.push({ name: fn.name, type: "http" });
     for (const { exports } of tableHandlers)
-      for (const fn of exports) manifest.push({ name: fn.config.name ?? fn.exportName, type: "table" });
+      for (const fn of exports) manifest.push({ name: fn.name, type: "table" });
     for (const { exports } of appHandlers)
-      for (const fn of exports) manifest.push({ name: fn.config.name ?? fn.exportName, type: "app" });
+      for (const fn of exports) manifest.push({ name: fn.name, type: "app" });
     for (const { exports } of staticSiteHandlers)
-      for (const fn of exports) manifest.push({ name: fn.config.name ?? fn.exportName, type: "site" });
+      for (const fn of exports) manifest.push({ name: fn.name, type: "site" });
     for (const { exports } of fifoQueueHandlers)
-      for (const fn of exports) manifest.push({ name: fn.config.name ?? fn.exportName, type: "queue" });
+      for (const fn of exports) manifest.push({ name: fn.name, type: "queue" });
 
     manifest.sort((a, b) => a.name.localeCompare(b.name));
     const logComplete = createLiveProgress(manifest);

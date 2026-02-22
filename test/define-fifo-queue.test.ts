@@ -66,7 +66,6 @@ describe("extractFifoQueueConfigs", () => {
     const source = `
       import { defineFifoQueue } from "effortless-aws";
       export const q = defineFifoQueue({
-        name: "my-queue",
         batchSize: 10,
         schema: (input) => input,
         onMessage: async ({ message }) => {},
@@ -74,7 +73,7 @@ describe("extractFifoQueueConfigs", () => {
       });
     `;
     const configs = extractFifoQueueConfigs(source);
-    expect(configs[0]!.config.name).toBe("my-queue");
+    expect(configs[0]!.name).toBe("q");
     expect(configs[0]!.config.batchSize).toBe(10);
     expect(configs[0]!.config).not.toHaveProperty("onMessage");
     expect(configs[0]!.config).not.toHaveProperty("schema");

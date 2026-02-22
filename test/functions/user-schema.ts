@@ -22,7 +22,6 @@ const processUser = (input: unknown) =>
   );
 
 export default defineHttp({
-  name: "effect-schema-test",
   method: "POST",
   path: "/user",
   onRequest: async ({ req }) => {

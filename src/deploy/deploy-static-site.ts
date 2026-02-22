@@ -106,9 +106,8 @@ const deployMiddlewareLambda = (input: {
 export const deployStaticSite = (input: DeployStaticSiteInput) =>
   Effect.gen(function* () {
     const { projectDir, project, region, fn } = input;
-    const { exportName, config } = fn;
+    const { exportName, name: handlerName, config } = fn;
     const stage = resolveStage(input.stage);
-    const handlerName = config.name ?? exportName;
     const hasMiddleware = fn.hasHandler;
 
     const tagCtx: TagContext = { project, stage, handler: handlerName };

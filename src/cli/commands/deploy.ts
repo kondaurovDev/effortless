@@ -152,8 +152,8 @@ export const deployCommand = Command.make(
               let handlerType: "http" | "table" | "app" = "http";
 
               for (const { file, exports } of discovered.httpHandlers) {
-                for (const { exportName, config: handlerConfig } of exports) {
-                  if (handlerConfig.name === targetValue) {
+                for (const { exportName, name } of exports) {
+                  if (name === targetValue) {
                     foundFile = file;
                     foundExport = exportName;
                     break;
@@ -164,8 +164,8 @@ export const deployCommand = Command.make(
 
               if (!foundFile) {
                 for (const { file, exports } of discovered.tableHandlers) {
-                  for (const { exportName, config: handlerConfig } of exports) {
-                    if (handlerConfig.name === targetValue) {
+                  for (const { exportName, name } of exports) {
+                    if (name === targetValue) {
                       foundFile = file;
                       foundExport = exportName;
                       handlerType = "table";
@@ -178,8 +178,8 @@ export const deployCommand = Command.make(
 
               if (!foundFile) {
                 for (const { file, exports } of discovered.appHandlers) {
-                  for (const { exportName, config: handlerConfig } of exports) {
-                    if (handlerConfig.name === targetValue) {
+                  for (const { exportName, name } of exports) {
+                    if (name === targetValue) {
                       foundFile = file;
                       foundExport = exportName;
                       handlerType = "app";
@@ -194,18 +194,18 @@ export const deployCommand = Command.make(
                 yield* Console.error(`Error: Handler "${targetValue}" not found`);
                 yield* Console.log("\nAvailable handlers:");
                 for (const { exports } of discovered.httpHandlers) {
-                  for (const { config: cfg } of exports) {
-                    yield* Console.log(`  ${c.cyan("[http]")}  ${cfg.name}`);
+                  for (const { name } of exports) {
+                    yield* Console.log(`  ${c.cyan("[http]")}  ${name}`);
                   }
                 }
                 for (const { exports } of discovered.tableHandlers) {
-                  for (const { config: cfg } of exports) {
-                    yield* Console.log(`  ${c.cyan("[table]")} ${cfg.name}`);
+                  for (const { name } of exports) {
+                    yield* Console.log(`  ${c.cyan("[table]")} ${name}`);
                   }
                 }
                 for (const { exports } of discovered.appHandlers) {
-                  for (const { config: cfg } of exports) {
-                    yield* Console.log(`  ${c.cyan("[app]")}   ${cfg.name}`);
+                  for (const { name } of exports) {
+                    yield* Console.log(`  ${c.cyan("[app]")}   ${name}`);
                   }
                 }
                 return;

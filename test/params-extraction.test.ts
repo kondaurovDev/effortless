@@ -181,7 +181,6 @@ describe("params extraction", () => {
         import { defineTable, param } from "effortless-aws";
 
         export const orders = defineTable({
-          name: "orders",
           config: {
             webhookUrl: param("webhook-url"),
           },
@@ -192,7 +191,7 @@ describe("params extraction", () => {
       const configs = extractTableConfigs(source);
 
       expect(configs[0]!.config).not.toHaveProperty("config");
-      expect(configs[0]!.config.name).toBe("orders");
+      expect(configs[0]!.name).toBe("orders");
     });
 
   });

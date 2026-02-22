@@ -13,7 +13,6 @@ export const sessions = defineTable<Session>({});
 // ── GET /hello (with params) ─────────────────────────────────
 
 export const hello = defineHttp({
-  name: "api-hello",
   method: "GET",
   path: "/hello",
   config: {
@@ -47,7 +46,6 @@ const decodeUser = (input: unknown) =>
   );
 
 export const user = defineHttp({
-  name: "api-user",
   method: "POST",
   path: "/user",
   deps: { sessions },

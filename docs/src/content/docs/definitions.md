@@ -196,7 +196,6 @@ export const api = defineHttp({
   path: string,  // e.g. "/api/users/{id}"
 
   // Optional
-  name?: string,                      // defaults to export name
   memory?: number,
   timeout?: DurationInput,
   permissions?: Permission[],         // additional IAM permissions (e.g. ["s3:PutObject"])
@@ -292,7 +291,6 @@ export const orders = defineTable({
   schema?: (input: unknown) => T,     // infers record type T (or use typed<T>())
 
   // Optional — table
-  name?: string,                      // defaults to export name
   billingMode?: "PAY_PER_REQUEST" | "PROVISIONED",  // default: PAY_PER_REQUEST
   tagField?: string,                  // field in data for entity discriminant (default: "tag")
 
@@ -556,7 +554,6 @@ export const app = defineApp({
   dir: string,                       // directory with built site files
 
   // Optional
-  name?: string,                     // defaults to export name
   path?: string,                     // base URL path (e.g. "/app")
   index?: string,                    // default: "index.html"
   spa?: boolean,                     // SPA mode: serve index for all paths (default: false)
@@ -602,7 +599,6 @@ export const docs = defineStaticSite({
   dir: string,                       // directory with built site files
 
   // Optional
-  name?: string,                     // defaults to export name
   index?: string,                    // default: "index.html"
   spa?: boolean,                     // SPA mode: serve index for all paths (default: false)
   build?: string,                    // shell command to run before deploy
@@ -738,7 +734,6 @@ Creates: SQS FIFO Queue + Lambda + Event Source Mapping + IAM permissions
 ```typescript
 export const orderQueue = defineFifoQueue({
   // Optional — queue
-  name?: string,                        // defaults to export name
   batchSize?: number,                   // 1-10, default: 10
   batchWindow?: number,                 // seconds (0-300), default: 0
   visibilityTimeout?: number,           // seconds (default: max of timeout or 30)

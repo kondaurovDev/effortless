@@ -33,8 +33,7 @@ const TABLE_DEFAULT_PERMISSIONS = ["dynamodb:*", "logs:*"] as const;
 /** @internal */
 export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, depsPermissions, staticGlobs }: DeployTableFunctionInput) =>
   Effect.gen(function* () {
-    const { exportName, config } = fn;
-    const handlerName = config.name ?? exportName;
+    const { exportName, name: handlerName, config } = fn;
 
     const tagCtx: TagContext = {
       project: input.project,

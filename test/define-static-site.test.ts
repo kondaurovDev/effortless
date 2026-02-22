@@ -33,7 +33,6 @@ describe("defineStaticSite extraction", () => {
       import { defineStaticSite } from "effortless-aws";
 
       export default defineStaticSite({
-        name: "marketing",
         dir: "dist",
         index: "main.html",
       });
@@ -44,7 +43,6 @@ describe("defineStaticSite extraction", () => {
     expect(configs).toHaveLength(1);
     expect(configs[0]!.exportName).toBe("default");
     expect(configs[0]!.config).toEqual({
-      name: "marketing",
       dir: "dist",
       index: "main.html",
     });

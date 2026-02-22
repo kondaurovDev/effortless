@@ -164,7 +164,6 @@ describe("deps extraction", () => {
         import { users } from "./users";
 
         export const orders = defineTable({
-          name: "orders",
           deps: { users },
           onRecord: async ({ record }) => {}
         });
@@ -173,7 +172,7 @@ describe("deps extraction", () => {
       const configs = extractTableConfigs(source);
 
       expect(configs[0]!.config).not.toHaveProperty("deps");
-      expect(configs[0]!.config.name).toBe("orders");
+      expect(configs[0]!.name).toBe("orders");
     });
 
   });

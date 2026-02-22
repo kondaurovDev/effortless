@@ -22,7 +22,7 @@ export const collectRequiredParams = (
   const seen = new Map<string, RequiredParam>();
 
   const collect = (
-    handlerGroups: { exports: { exportName: string; config: { name?: string }; paramEntries: ParamEntry[] }[] }[],
+    handlerGroups: { exports: { name: string; paramEntries: ParamEntry[] }[] }[],
   ) => {
     for (const { exports } of handlerGroups) {
       for (const fn of exports) {
@@ -33,7 +33,7 @@ export const collectRequiredParams = (
               ssmPath,
               propName,
               ssmKey,
-              handlerName: fn.config.name ?? fn.exportName,
+              handlerName: fn.name,
             });
           }
         }

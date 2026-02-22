@@ -7,7 +7,7 @@ const parseSource = (source: string) => {
   return project.createSourceFile("input.ts", source);
 };
 
-const RUNTIME_PROPS = ["onRequest", "onRecord", "onBatchComplete", "onBatch", "onMessage", "setup", "schema", "onError", "deps", "config", "static", "middleware"];
+const RUNTIME_PROPS = ["name", "onRequest", "onRecord", "onBatchComplete", "onBatch", "onMessage", "setup", "schema", "onError", "deps", "config", "static", "middleware"];
 
 const buildConfigWithoutRuntime = (obj: ObjectLiteralExpression): string => {
   const props = obj.getProperties()
@@ -197,6 +197,7 @@ export type HandlerType = keyof typeof handlerRegistry;
 
 export type ExtractedConfig<T = unknown> = {
   exportName: string;
+  name: string;
   config: T;
   hasHandler: boolean;
   depsKeys: string[];
@@ -220,12 +221,12 @@ export const extractHandlerConfigs = <T>(source: string, type: HandlerType): Ext
         if (firstArg && firstArg.getKind() === SyntaxKind.ObjectLiteralExpression) {
           const objLiteral = firstArg as ObjectLiteralExpression;
           const configText = buildConfigWithoutRuntime(objLiteral);
-          const configObj = new Function(`return ${configText}`)() as T;
+          const config = new Function(`return ${configText}`)() as T;
           const hasHandler = handlerProps.some(p => extractPropertyFromObject(objLiteral, p) !== undefined);
           const depsKeys = extractDepsKeys(objLiteral);
           const paramEntries = extractParamEntries(objLiteral);
           const staticGlobs = extractStaticGlobs(objLiteral);
-          results.push({ exportName: "default", config: configObj, hasHandler, depsKeys, paramEntries, staticGlobs });
+          results.push({ exportName: "default", name: "default", config, hasHandler, depsKeys, paramEntries, staticGlobs });
         }
       }
     }
@@ -246,12 +247,13 @@ export const extractHandlerConfigs = <T>(source: string, type: HandlerType): Ext
       if (firstArg && firstArg.getKind() === SyntaxKind.ObjectLiteralExpression) {
         const objLiteral = firstArg as ObjectLiteralExpression;
         const configText = buildConfigWithoutRuntime(objLiteral);
-        const configObj = new Function(`return ${configText}`)() as T;
+        const exportName = decl.getName();
+        const config = new Function(`return ${configText}`)() as T;
         const hasHandler = handlerProps.some(p => extractPropertyFromObject(objLiteral, p) !== undefined);
         const depsKeys = extractDepsKeys(objLiteral);
         const paramEntries = extractParamEntries(objLiteral);
         const staticGlobs = extractStaticGlobs(objLiteral);
-        results.push({ exportName: decl.getName(), config: configObj, hasHandler, depsKeys, paramEntries, staticGlobs });
+        results.push({ exportName, name: exportName, config, hasHandler, depsKeys, paramEntries, staticGlobs });
       }
     });
   });

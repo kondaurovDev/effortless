@@ -41,7 +41,6 @@ describe("defineApp extraction", () => {
       import { defineApp } from "effortless-aws";
 
       export default defineApp({
-        name: "webapp",
         path: "/",
         dir: "dist",
         spa: true,
@@ -54,7 +53,6 @@ describe("defineApp extraction", () => {
     expect(configs).toHaveLength(1);
     expect(configs[0]!.exportName).toBe("default");
     expect(configs[0]!.config).toEqual({
-      name: "webapp",
       path: "/",
       dir: "dist",
       spa: true,

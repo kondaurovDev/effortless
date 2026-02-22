@@ -27,8 +27,6 @@ export type LogLevel = "error" | "info" | "debug";
  * Common Lambda configuration shared by all handler types.
  */
 export type LambdaConfig = {
-  /** Handler name. Defaults to export name if not specified */
-  name?: string;
   /** Lambda memory in MB (default: 256) */
   memory?: number;
   /** Lambda timeout in seconds (default: 30) */

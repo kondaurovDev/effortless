@@ -32,7 +32,6 @@ describe("defineTable", () => {
         import { defineTable } from "effortless-aws";
 
         export const orders = defineTable({
-          name: "orders",
           streamView: "NEW_AND_OLD_IMAGES",
           batchSize: 50,
           memory: 512,
@@ -47,7 +46,7 @@ describe("defineTable", () => {
       expect(configs).toHaveLength(1);
       const first = configs[0]!;
       expect(first.exportName).toBe("orders");
-      expect(first.config.name).toBe("orders");
+      expect(first.name).toBe("orders");
       expect(first.config.streamView).toBe("NEW_AND_OLD_IMAGES");
       expect(first.config.batchSize).toBe(50);
       expect(first.config.memory).toBe(512);
@@ -62,7 +61,6 @@ describe("defineTable", () => {
         import { defineTable } from "effortless-aws";
 
         export default defineTable({
-          name: "users",
           onRecord: async ({ record }) => {}
         });
       `;
@@ -72,7 +70,7 @@ describe("defineTable", () => {
       expect(configs).toHaveLength(1);
       const first = configs[0]!;
       expect(first.exportName).toBe("default");
-      expect(first.config.name).toBe("users");
+      expect(first.name).toBe("default");
       expect(first.hasHandler).toBe(true);
     });
 
@@ -80,9 +78,7 @@ describe("defineTable", () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const users = defineTable({
-          name: "users",
-        });
+        export const users = defineTable({});
       `;
 
       const configs = extractTableConfigs(source);
