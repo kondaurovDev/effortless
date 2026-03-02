@@ -4,9 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  effortless-aws: link:..
-
 importers:
 
   .:
@@ -17,12 +14,15 @@ importers:
       '@astrojs/starlight':
         specifier: ^0.32.0
         version: 0.32.6(astro@5.17.2(rollup@4.57.1)(typescript@5.9.3))
+      '@effortless-aws/cli':
+        specifier: link:../packages/effortless-aws-cli
+        version: link:../packages/effortless-aws-cli
       astro:
         specifier: ^5.0.0
         version: 5.17.2(rollup@4.57.1)(typescript@5.9.3)
       effortless-aws:
-        specifier: link:..
-        version: link:..
+        specifier: link:../packages/effortless-aws
+        version: link:../packages/effortless-aws
       sharp:
         specifier: ^0.33.0
         version: 0.33.5
