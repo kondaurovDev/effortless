@@ -1,5 +1,13 @@
 # @effortless-aws/cli
 
+## 0.2.1
+
+### Patch Changes
+
+- [`b14cdb8`](https://github.com/kondaurovDev/effortless-aws/commit/b14cdb874e2f5cdbf04f05e7c2594a0c2b4625a3) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - fix: expand CloudFront route patterns so `/prefix/*` also covers bare `/prefix` path
+
+- [`e08d8cd`](https://github.com/kondaurovDev/effortless-aws/commit/e08d8cdf28e33486e1126d85bd94b45e90a03106) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Warn about TypeScript entry points in production dependencies that cause ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING at runtime; show dependency warnings in `eff status` output; fail deploy early when a handler deps key references a missing table/bucket/mailer handler
+
 ## 0.2.0
 
 ### Minor Changes
