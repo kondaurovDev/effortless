@@ -59,9 +59,9 @@ export const computeLockfileHash = (projectDir: string) =>
     // Collect all transitive production packages
     const { packages: allPackages, resolvedPaths } = collectTransitiveDeps(projectDir, prodDeps);
 
-    // Build a sorted list of package@version pairs
+    // Build a sorted list of package@version pairs (exclude AWS runtime packages)
     const packageVersions: string[] = [];
-    for (const pkgName of Array.from(allPackages).sort()) {
+    for (const pkgName of Array.from(allPackages).filter(p => !isAwsRuntime(p)).sort()) {
       const pkgPath = resolvedPaths.get(pkgName)
         ?? findInPnpmStore(projectDir, pkgName)
         ?? getPackageRealPath(projectDir, pkgName);
@@ -388,7 +388,7 @@ const collectTransitiveDeps = (
 
 /** AWS packages available in the Lambda runtime — excluded from layer */
 const isAwsRuntime = (pkg: string) =>
-  pkg.startsWith("@aws-sdk/") || pkg.startsWith("@smithy/");
+  pkg.startsWith("@aws-sdk/") || pkg.startsWith("@smithy/") || pkg.startsWith("@aws-crypto/") || pkg.startsWith("@aws/");
 
 export type CollectLayerResult = {
   packages: string[];
@@ -459,7 +459,9 @@ export const collectLayerPackages = (projectDir: string, dependencies: string[])
     }
   }
 
-  return { packages: Array.from(packages), resolvedPaths, warnings };
+  // Filter out AWS SDK/Smithy packages — they're already in the Lambda runtime
+  const filtered = Array.from(packages).filter(pkg => !isAwsRuntime(pkg));
+  return { packages: filtered, resolvedPaths, warnings };
 };
 
 /**

@@ -360,6 +360,87 @@ describe("layer", () => {
       await fs.rm(pnpmDir, { recursive: true });
     });
 
+    it("should exclude @aws-sdk/*, @smithy/*, and @aws-crypto/* packages", async () => {
+      const nodeModules = path.join(tempDir, "node_modules");
+
+      // pkg-with-aws depends on AWS runtime packages
+      await fs.mkdir(path.join(nodeModules, "pkg-with-aws"), { recursive: true });
+      await fs.writeFile(
+        path.join(nodeModules, "pkg-with-aws", "package.json"),
+        JSON.stringify({
+          name: "pkg-with-aws",
+          version: "1.0.0",
+          dependencies: {
+            "@aws-sdk/client-dynamodb": "3.0.0",
+            "@smithy/types": "1.0.0",
+            "@aws-crypto/sha256-js": "5.0.0"
+          }
+        })
+      );
+      await fs.writeFile(
+        path.join(nodeModules, "pkg-with-aws", "index.js"),
+        'module.exports = "with-aws";'
+      );
+
+      // Create the AWS packages in node_modules
+      await fs.mkdir(path.join(nodeModules, "@aws-sdk", "client-dynamodb"), { recursive: true });
+      await fs.writeFile(
+        path.join(nodeModules, "@aws-sdk", "client-dynamodb", "package.json"),
+        JSON.stringify({ name: "@aws-sdk/client-dynamodb", version: "3.0.0" })
+      );
+      await fs.mkdir(path.join(nodeModules, "@smithy", "types"), { recursive: true });
+      await fs.writeFile(
+        path.join(nodeModules, "@smithy", "types", "package.json"),
+        JSON.stringify({ name: "@smithy/types", version: "1.0.0" })
+      );
+      await fs.mkdir(path.join(nodeModules, "@aws-crypto", "sha256-js"), { recursive: true });
+      await fs.writeFile(
+        path.join(nodeModules, "@aws-crypto", "sha256-js", "package.json"),
+        JSON.stringify({ name: "@aws-crypto/sha256-js", version: "5.0.0" })
+      );
+
+      const result = collectLayerPackages(tempDir, ["pkg-with-aws"]);
+
+      // pkg-with-aws should be included, but AWS runtime packages should not
+      expect(result.packages).toContain("pkg-with-aws");
+      expect(result.packages.some(p => p.startsWith("@aws-sdk/"))).toBe(false);
+      expect(result.packages.some(p => p.startsWith("@smithy/"))).toBe(false);
+      expect(result.packages.some(p => p.startsWith("@aws-crypto/"))).toBe(false);
+
+      // Cleanup
+      await fs.rm(path.join(nodeModules, "pkg-with-aws"), { recursive: true });
+      await fs.rm(path.join(nodeModules, "@aws-sdk"), { recursive: true });
+      await fs.rm(path.join(nodeModules, "@smithy"), { recursive: true });
+      await fs.rm(path.join(nodeModules, "@aws-crypto"), { recursive: true });
+    });
+
+    it("should exclude @aws-sdk/* and @smithy/* from lockfile hash", async () => {
+      const nodeModules = path.join(tempDir, "node_modules");
+
+      // Compute hash before adding AWS SDK packages
+      const hashBefore = await Effect.runPromise(computeLockfileHash(tempDir));
+
+      // Add an AWS SDK package as a transitive dep of pkg-b
+      await fs.mkdir(path.join(nodeModules, "@aws-sdk", "client-s3"), { recursive: true });
+      await fs.writeFile(
+        path.join(nodeModules, "@aws-sdk", "client-s3", "package.json"),
+        JSON.stringify({ name: "@aws-sdk/client-s3", version: "3.500.0" })
+      );
+      const pkgBPath = path.join(nodeModules, "pkg-b", "package.json");
+      const pkgBOriginal = await fs.readFile(pkgBPath, "utf-8");
+      const pkgB = JSON.parse(pkgBOriginal);
+      pkgB.dependencies["@aws-sdk/client-s3"] = "3.500.0";
+      await fs.writeFile(pkgBPath, JSON.stringify(pkgB));
+
+      // Hash should be the same — AWS SDK packages are excluded
+      const hashAfter = await Effect.runPromise(computeLockfileHash(tempDir));
+      expect(hashAfter).toBe(hashBefore);
+
+      // Cleanup
+      await fs.writeFile(pkgBPath, pkgBOriginal);
+      await fs.rm(path.join(nodeModules, "@aws-sdk"), { recursive: true });
+    });
+
     it("should collect deps from multiple package versions in Phase 2", async () => {
       // Simulate: pkg-multi v3 at root (no deps), pkg-multi v2 in pnpm store (depends on pkg-v2-dep)
       const nodeModules = path.join(tempDir, "node_modules");
