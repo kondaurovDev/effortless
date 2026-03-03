@@ -16,6 +16,10 @@ export type AppConfig = LambdaWithPermissions & {
   build?: string;
   /** Custom domain name. String or stage-keyed record (e.g., { prod: "app.example.com" }). */
   domain?: string | Record<string, string>;
+  /** CloudFront route overrides: path patterns forwarded to API Gateway instead of the SSR Lambda.
+   * Keys are CloudFront path patterns (e.g., "/api/*"), values are handler references.
+   * Example: `routes: { "/api/*": api }` */
+  routes?: Record<string, { readonly __brand: string }>;
 };
 
 /**

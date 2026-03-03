@@ -35,6 +35,7 @@ export type DeployStaticSiteInput = {
   file?: string;
   /** API Gateway domain for route proxying (e.g. "abc123.execute-api.eu-west-1.amazonaws.com") */
   apiOriginDomain?: string;
+  verbose?: boolean;
 };
 
 export type DeployStaticSiteResult = {
@@ -166,10 +167,21 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     // 1. Run build command if specified
     if (config.build) {
       yield* Effect.logDebug(`Building site: ${config.build}`);
+      const buildStart = Date.now();
       yield* Effect.try({
-        try: () => execSync(config.build!, { cwd: projectDir, stdio: "inherit" }),
-        catch: (error) => new Error(`Site build failed: ${error}`),
+        try: () => execSync(config.build!, {
+          cwd: projectDir,
+          stdio: input.verbose ? "inherit" : "pipe",
+        }),
+        catch: (error) => {
+          if (!input.verbose && error && typeof error === "object" && "stderr" in error) {
+            const stderr = String((error as { stderr: unknown }).stderr);
+            if (stderr) process.stderr.write(stderr);
+          }
+          return new Error(`Site build failed: ${config.build}`);
+        },
       });
+      yield* Effect.logDebug(`Site built in ${((Date.now() - buildStart) / 1000).toFixed(1)}s`);
     }
 
     // 2. Ensure S3 bucket

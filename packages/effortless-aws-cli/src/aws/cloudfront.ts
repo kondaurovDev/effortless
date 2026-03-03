@@ -496,11 +496,15 @@ export type EnsureSsrDistributionInput = {
   tags: Record<string, string>;
   aliases?: string[];
   acmCertificateArn?: string;
+  /** API Gateway domain for route proxying (e.g. "abc123.execute-api.eu-west-1.amazonaws.com") */
+  apiOriginDomain?: string;
+  /** CloudFront path patterns to forward to API Gateway (e.g. ["/api/*"]) */
+  routePatterns?: string[];
 };
 
 export const ensureSsrDistribution = (input: EnsureSsrDistributionInput) =>
   Effect.gen(function* () {
-    const { project, stage, handlerName, bucketName, bucketRegion, s3OacId, lambdaOriginDomain, lambdaOacId, assetPatterns, tags, aliases, acmCertificateArn } = input;
+    const { project, stage, handlerName, bucketName, bucketRegion, s3OacId, lambdaOriginDomain, lambdaOacId, assetPatterns, tags, aliases, acmCertificateArn, apiOriginDomain, routePatterns } = input;
 
     const comment = makeDistComment(project, stage, handlerName);
     const lambdaOriginId = `Lambda-${project}-${stage}-${handlerName}`;
@@ -521,7 +525,10 @@ export const ensureSsrDistribution = (input: EnsureSsrDistributionInput) =>
     const ALL_METHODS = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"] as const;
     const CACHED_METHODS = ["GET", "HEAD"] as const;
 
-    // Origins: Lambda Function URL (default) + S3 (static assets)
+    // Origins: Lambda Function URL (default) + S3 (static assets) + optional API Gateway
+    const hasApiRoutes = apiOriginDomain && routePatterns && routePatterns.length > 0;
+    const apiOriginId = hasApiRoutes ? `API-${project}-${stage}` : undefined;
+
     const originsItems = [
       {
         Id: lambdaOriginId,
@@ -546,6 +553,22 @@ export const ensureSsrDistribution = (input: EnsureSsrDistributionInput) =>
         S3OriginConfig: { OriginAccessIdentity: "" },
         CustomHeaders: { Quantity: 0, Items: [] as { HeaderName: string; HeaderValue: string }[] },
       },
+      ...(hasApiRoutes ? [{
+        Id: apiOriginId!,
+        DomainName: apiOriginDomain,
+        OriginPath: "",
+        ConnectionAttempts: 3,
+        ConnectionTimeout: 10,
+        CustomOriginConfig: {
+          HTTPPort: 80,
+          HTTPSPort: 443,
+          OriginProtocolPolicy: "https-only" as const,
+          OriginSslProtocols: { Quantity: 1, Items: ["TLSv1.2" as const] },
+          OriginReadTimeout: 30,
+          OriginKeepaliveTimeout: 5,
+        },
+        CustomHeaders: { Quantity: 0, Items: [] as { HeaderName: string; HeaderValue: string }[] },
+      }] : []),
     ];
 
     // Default behavior → Lambda Function URL (SSR)
@@ -567,28 +590,48 @@ export const ensureSsrDistribution = (input: EnsureSsrDistributionInput) =>
       FieldLevelEncryptionId: "",
     };
 
-    // Cache behaviors for static asset patterns → S3
-    const cacheBehaviors = assetPatterns.length > 0
-      ? {
-          Quantity: assetPatterns.length,
-          Items: assetPatterns.map(pattern => ({
-            PathPattern: pattern,
-            TargetOriginId: s3OriginId,
-            ViewerProtocolPolicy: "redirect-to-https" as const,
-            AllowedMethods: {
-              Quantity: 2 as const,
-              Items: [...CACHED_METHODS],
-              CachedMethods: { Quantity: 2 as const, Items: [...CACHED_METHODS] },
-            },
-            Compress: true,
-            SmoothStreaming: false,
-            CachePolicyId: CACHING_OPTIMIZED_POLICY_ID,
-            ResponseHeadersPolicyId: SECURITY_HEADERS_POLICY_ID,
-            FunctionAssociations: { Quantity: 0, Items: [] },
-            LambdaFunctionAssociations: { Quantity: 0, Items: [] },
-            FieldLevelEncryptionId: "",
-          })),
-        }
+    // Cache behaviors: API routes (no cache) → asset patterns (cached) → default (SSR)
+    const apiRouteBehaviors = hasApiRoutes
+      ? routePatterns.map(pattern => ({
+          PathPattern: pattern,
+          TargetOriginId: apiOriginId!,
+          ViewerProtocolPolicy: "redirect-to-https" as const,
+          AllowedMethods: {
+            Quantity: 7 as const,
+            Items: [...ALL_METHODS],
+            CachedMethods: { Quantity: 2 as const, Items: [...CACHED_METHODS] },
+          },
+          Compress: true,
+          SmoothStreaming: false,
+          CachePolicyId: CACHING_DISABLED_POLICY_ID,
+          OriginRequestPolicyId: ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID,
+          FunctionAssociations: { Quantity: 0, Items: [] },
+          LambdaFunctionAssociations: { Quantity: 0, Items: [] },
+          FieldLevelEncryptionId: "",
+        }))
+      : [];
+
+    const assetBehaviors = assetPatterns.map(pattern => ({
+      PathPattern: pattern,
+      TargetOriginId: s3OriginId,
+      ViewerProtocolPolicy: "redirect-to-https" as const,
+      AllowedMethods: {
+        Quantity: 2 as const,
+        Items: [...CACHED_METHODS],
+        CachedMethods: { Quantity: 2 as const, Items: [...CACHED_METHODS] },
+      },
+      Compress: true,
+      SmoothStreaming: false,
+      CachePolicyId: CACHING_OPTIMIZED_POLICY_ID,
+      ResponseHeadersPolicyId: SECURITY_HEADERS_POLICY_ID,
+      FunctionAssociations: { Quantity: 0, Items: [] },
+      LambdaFunctionAssociations: { Quantity: 0, Items: [] },
+      FieldLevelEncryptionId: "",
+    }));
+
+    const allBehaviors = [...apiRouteBehaviors, ...assetBehaviors];
+    const cacheBehaviors = allBehaviors.length > 0
+      ? { Quantity: allBehaviors.length, Items: allBehaviors }
       : { Quantity: 0, Items: [] as never[] };
 
     // Find existing distribution by tags

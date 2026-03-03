@@ -2,8 +2,9 @@ import { Args, Command, Options } from "@effect/cli";
 import { Effect, Console, Logger, LogLevel, Option, Schedule } from "effect";
 
 import { Aws } from "../../aws";
-import { findHandlerFiles, discoverHandlers } from "~/build/bundle";
-import { loadConfig, projectOption, stageOption, regionOption, verboseOption, getPatternsFromConfig } from "~/cli/config";
+import { findHandlerFiles, discoverHandlers, flattenHandlers } from "~/build/bundle";
+import { projectOption, stageOption, regionOption, verboseOption, getPatternsFromConfig } from "~/cli/config";
+import { ProjectConfig } from "~/cli/project-config";
 import { c } from "~/cli/colors";
 
 const { cloudwatch_logs } = Aws;
@@ -91,7 +92,7 @@ export const logsCommand = Command.make(
   { handler: handlerArg, project: projectOption, stage: stageOption, region: regionOption, tail: tailOption, since: sinceOption, verbose: verboseOption },
   ({ handler: handlerName, project: projectOpt, stage, region, tail, since, verbose }) =>
     Effect.gen(function* () {
-      const config = yield* Effect.promise(loadConfig);
+      const { config, projectDir } = yield* ProjectConfig;
 
       const project = Option.getOrElse(projectOpt, () => config?.name ?? "");
       const finalStage = config?.stage ?? stage;
@@ -103,18 +104,12 @@ export const logsCommand = Command.make(
       }
 
       // Validate handler exists in code
-      const projectDir = process.cwd();
       const patterns = getPatternsFromConfig(config);
       if (patterns) {
         const files = findHandlerFiles(patterns, projectDir);
         const discovered = discoverHandlers(files);
 
-        const allHandlerNames = [
-          ...discovered.httpHandlers.flatMap(h => h.exports.map(e => e.exportName)),
-          ...discovered.tableHandlers.flatMap(h => h.exports.map(e => e.exportName)),
-          ...discovered.appHandlers.flatMap(h => h.exports.map(e => e.exportName)),
-          ...discovered.fifoQueueHandlers.flatMap(h => h.exports.map(e => e.exportName)),
-        ];
+        const allHandlerNames = flattenHandlers(discovered).map(h => h.exportName);
 
         if (!allHandlerNames.includes(handlerName)) {
           yield* Console.error(`Handler "${handlerName}" not found in code.`);
@@ -205,5 +200,5 @@ export const logsCommand = Command.make(
         Effect.provide(clientsLayer),
         Logger.withMinimumLogLevel(logLevel)
       );
-    })
-).pipe(Command.withDescription("Show logs for a handler"));
+    }).pipe(Effect.provide(ProjectConfig.Live))
+).pipe(Command.withDescription("Stream CloudWatch logs for a handler. Supports --tail for live tailing and --since for time range"));

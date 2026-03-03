@@ -29,6 +29,9 @@ export type DeployAppInput = {
   stage?: string;
   region: string;
   fn: ExtractedAppFunction;
+  /** API Gateway domain for route proxying (e.g. "abc123.execute-api.eu-west-1.amazonaws.com") */
+  apiOriginDomain?: string;
+  verbose?: boolean;
 };
 
 export type DeployAppResult = {
@@ -49,14 +52,35 @@ export const deployApp = (input: DeployAppInput) =>
     const handlerName = exportName;
 
     const tagCtx: TagContext = { project, stage, handler: handlerName };
+    const routePatterns = fn.routePatterns;
+
+    if (routePatterns.length > 0 && !input.apiOriginDomain) {
+      return yield* Effect.fail(
+        new Error(
+          `App "${exportName}" has routes but no API Gateway exists. ` +
+          `Ensure defineHttp() or defineApi() handlers are included in the discovery patterns.`
+        )
+      );
+    }
 
     // 1. Run build command if specified
     if (config.build) {
       yield* Effect.logDebug(`Building app: ${config.build}`);
+      const buildStart = Date.now();
       yield* Effect.try({
-        try: () => execSync(config.build!, { cwd: projectDir, stdio: "inherit" }),
-        catch: (error) => new Error(`App build failed: ${error}`),
+        try: () => execSync(config.build!, {
+          cwd: projectDir,
+          stdio: input.verbose ? "inherit" : "pipe",
+        }),
+        catch: (error) => {
+          if (!input.verbose && error && typeof error === "object" && "stderr" in error) {
+            const stderr = String((error as { stderr: unknown }).stderr);
+            if (stderr) process.stderr.write(stderr);
+          }
+          return new Error(`App build failed: ${config.build}`);
+        },
       });
+      yield* Effect.logDebug(`App built in ${((Date.now() - buildStart) / 1000).toFixed(1)}s`);
     }
 
     // 2. ZIP server directory
@@ -146,6 +170,9 @@ export const deployApp = (input: DeployAppInput) =>
       tags: makeTags(tagCtx, "cloudfront-distribution"),
       aliases,
       acmCertificateArn,
+      ...(input.apiOriginDomain && routePatterns.length > 0
+        ? { apiOriginDomain: input.apiOriginDomain, routePatterns }
+        : {}),
     });
 
     // 12. Add CloudFront → Lambda permission

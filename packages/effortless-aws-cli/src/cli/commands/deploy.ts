@@ -3,9 +3,10 @@ import { Effect, Console, Logger, LogLevel, Option } from "effect";
 import * as path from "path";
 
 import { deploy, deployAll, deployTable, deployAllTables, deployProject, type DeployTableResult } from "~/deploy/deploy";
-import { findHandlerFiles, discoverHandlers } from "~/build/bundle";
+import { findHandlerFiles, discoverHandlers, flattenHandlers } from "~/build/bundle";
 import { Aws } from "../../aws";
-import { loadConfig, projectOption, stageOption, regionOption, verboseOption, noSitesOption, getPatternsFromConfig } from "~/cli/config";
+import { projectOption, stageOption, regionOption, verboseOption, noSitesOption, getPatternsFromConfig } from "~/cli/config";
+import { ProjectConfig } from "~/cli/project-config";
 import { c } from "~/cli/colors";
 
 const deployTargetArg = Args.text({ name: "target" }).pipe(
@@ -22,7 +23,7 @@ export const deployCommand = Command.make(
   { target: deployTargetArg, project: projectOption, stage: stageOption, region: regionOption, verbose: verboseOption, noSites: noSitesOption },
   ({ target, project: projectOpt, stage, region, verbose, noSites }) =>
     Effect.gen(function* () {
-      const config = yield* Effect.promise(loadConfig);
+      const { config, cwd, projectDir } = yield* ProjectConfig;
 
       const project = Option.getOrElse(projectOpt, () => config?.name ?? "");
       const finalStage = config?.stage ?? stage;
@@ -45,7 +46,6 @@ export const deployCommand = Command.make(
       });
 
       const logLevel = verbose ? LogLevel.Debug : LogLevel.Warning;
-      const projectDir = process.cwd();
 
       yield* Option.match(target, {
         onNone: () =>
@@ -58,14 +58,16 @@ export const deployCommand = Command.make(
 
             const results = yield* deployProject({
               projectDir,
+              packageDir: cwd,
               patterns,
               project,
               stage: finalStage,
               region: finalRegion,
               noSites,
+              verbose,
             });
 
-            const total = results.httpResults.length + results.tableResults.length + results.appResults.length + results.staticSiteResults.length;
+            const total = results.httpResults.length + results.tableResults.length + results.appResults.length + results.staticSiteResults.length + results.apiResults.length;
             yield* Console.log(`\n${c.green(`Deployed ${total} handler(s):`)}`);
 
             if (results.apiUrl) {
@@ -84,6 +86,10 @@ export const deployCommand = Command.make(
             for (const r of results.tableResults) {
               summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[table]")} ${c.bold(r.exportName)}` });
             }
+            for (const r of results.apiResults) {
+              const pathPart = results.apiUrl ? r.url.replace(results.apiUrl, "") : r.url;
+              summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[api]")}   ${c.bold(r.exportName)}  ${c.dim(pathPart)}` });
+            }
             for (const r of results.staticSiteResults) {
               summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[site]")}  ${c.bold(r.exportName)}: ${c.cyan(r.url)}` });
             }
@@ -99,6 +105,7 @@ export const deployCommand = Command.make(
 
               const input = {
                 projectDir,
+                packageDir: cwd,
                 file: fullPath,
                 project,
                 stage: finalStage,
@@ -148,74 +155,27 @@ export const deployCommand = Command.make(
               const files = findHandlerFiles(patterns, projectDir);
               const discovered = discoverHandlers(files);
 
-              let foundFile: string | null = null;
-              let foundExport: string | null = null;
-              let handlerType: "http" | "table" | "app" = "http";
+              const allHandlers = flattenHandlers(discovered);
+              const found = allHandlers.find(h => h.exportName === targetValue);
 
-              for (const { file, exports } of discovered.httpHandlers) {
-                for (const { exportName } of exports) {
-                  if (exportName === targetValue) {
-                    foundFile = file;
-                    foundExport = exportName;
-                    break;
-                  }
-                }
-                if (foundFile) break;
-              }
-
-              if (!foundFile) {
-                for (const { file, exports } of discovered.tableHandlers) {
-                  for (const { exportName } of exports) {
-                    if (exportName === targetValue) {
-                      foundFile = file;
-                      foundExport = exportName;
-                      handlerType = "table";
-                      break;
-                    }
-                  }
-                  if (foundFile) break;
-                }
-              }
-
-              if (!foundFile) {
-                for (const { file, exports } of discovered.appHandlers) {
-                  for (const { exportName } of exports) {
-                    if (exportName === targetValue) {
-                      foundFile = file;
-                      foundExport = exportName;
-                      handlerType = "app";
-                      break;
-                    }
-                  }
-                  if (foundFile) break;
-                }
-              }
-
-              if (!foundFile || !foundExport) {
+              if (!found) {
                 yield* Console.error(`Error: Handler "${targetValue}" not found`);
                 yield* Console.log("\nAvailable handlers:");
-                for (const { exports } of discovered.httpHandlers) {
-                  for (const { exportName } of exports) {
-                    yield* Console.log(`  ${c.cyan("[http]")}  ${exportName}`);
-                  }
-                }
-                for (const { exports } of discovered.tableHandlers) {
-                  for (const { exportName } of exports) {
-                    yield* Console.log(`  ${c.cyan("[table]")} ${exportName}`);
-                  }
-                }
-                for (const { exports } of discovered.appHandlers) {
-                  for (const { exportName } of exports) {
-                    yield* Console.log(`  ${c.cyan("[app]")}   ${exportName}`);
-                  }
+                for (const h of allHandlers) {
+                  yield* Console.log(`  ${c.cyan(`[${h.type}]`.padEnd(9))} ${h.exportName}`);
                 }
                 return;
               }
+
+              const foundFile = found.file;
+              const foundExport = found.exportName;
+              const handlerType = found.type;
 
               yield* Console.log(`Found handler ${c.bold(targetValue)} in ${c.dim(path.relative(projectDir, foundFile))}`);
 
               const input = {
                 projectDir,
+                packageDir: cwd,
                 file: foundFile,
                 project,
                 stage: finalStage,
@@ -237,5 +197,5 @@ export const deployCommand = Command.make(
         Effect.provide(clientsLayer),
         Logger.withMinimumLogLevel(logLevel)
       );
-    })
-).pipe(Command.withDescription("Deploy handlers (all from config, by file path, or by handler name)"));
+    }).pipe(Effect.provide(ProjectConfig.Live))
+).pipe(Command.withDescription("Deploy handlers to AWS Lambda. Accepts a handler name, file path, or deploys all from config"));

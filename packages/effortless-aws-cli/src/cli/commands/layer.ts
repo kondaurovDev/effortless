@@ -6,9 +6,11 @@ import * as fs from "fs";
 import {
   collectLayerPackages,
   readProductionDependencies,
-  computeLockfileHash
+  computeLockfileHash,
+  checkDependencyWarnings
 } from "../../aws";
-import { loadConfig, verboseOption, outputOption } from "~/cli/config";
+import { verboseOption, outputOption } from "~/cli/config";
+import { ProjectConfig } from "~/cli/project-config";
 import { c } from "~/cli/colors";
 
 const buildOption = Options.boolean("build").pipe(
@@ -20,20 +22,27 @@ export const layerCommand = Command.make(
   { build: buildOption, output: outputOption, verbose: verboseOption },
   ({ build, output, verbose }) =>
     Effect.gen(function* () {
-      const config = yield* Effect.promise(loadConfig);
-      const projectDir = process.cwd();
+      const { config, cwd } = yield* ProjectConfig;
 
       if (build) {
-        yield* buildLayer(projectDir, output, verbose);
+        yield* buildLayer(cwd, output, verbose);
       } else {
-        yield* showLayerInfo(projectDir, config?.name, verbose);
+        yield* showLayerInfo(cwd, config?.name, verbose);
       }
-    })
-).pipe(Command.withDescription("Show or build the dependency layer"));
+    }).pipe(Effect.provide(ProjectConfig.Live))
+).pipe(Command.withDescription("Inspect or locally build the shared Lambda dependency layer from package.json"));
 
 const showLayerInfo = (projectDir: string, projectName: string | undefined, verbose: boolean) =>
   Effect.gen(function* () {
     yield* Console.log(`\n${c.bold("=== Layer Packages Preview ===")}\n`);
+
+    const depWarnings = yield* checkDependencyWarnings(projectDir).pipe(
+      Effect.catchAll(() => Effect.succeed([] as string[]))
+    );
+    for (const w of depWarnings) {
+      yield* Console.log(c.yellow(`  ⚠ ${w}`));
+    }
+    if (depWarnings.length > 0) yield* Console.log("");
 
     const prodDeps = yield* readProductionDependencies(projectDir).pipe(
       Effect.catchAll(() => Effect.succeed([] as string[]))
@@ -103,6 +112,14 @@ const buildLayer = (projectDir: string, output: string, verbose: boolean) =>
     fs.mkdirSync(layerDir, { recursive: true });
 
     yield* Console.log(`\n${c.bold("=== Building Layer Locally ===")}\n`);
+
+    const depWarnings = yield* checkDependencyWarnings(projectDir).pipe(
+      Effect.catchAll(() => Effect.succeed([] as string[]))
+    );
+    for (const w of depWarnings) {
+      yield* Console.log(c.yellow(`  ⚠ ${w}`));
+    }
+    if (depWarnings.length > 0) yield* Console.log("");
 
     const prodDeps = yield* readProductionDependencies(projectDir).pipe(
       Effect.catchAll(() => Effect.succeed([] as string[]))

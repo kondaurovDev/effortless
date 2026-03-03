@@ -244,3 +244,22 @@ export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
 
   return { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers };
 };
+
+/** Flatten all discovered handlers into a list of { exportName, file, type } */
+export const flattenHandlers = (discovered: DiscoveredHandlers) => {
+  const entries = (
+    type: string,
+    handlers: { file: string; exports: { exportName: string }[] }[],
+  ) => handlers.flatMap(h => h.exports.map(e => ({ exportName: e.exportName, file: h.file, type })));
+
+  return [
+    ...entries("http", discovered.httpHandlers),
+    ...entries("table", discovered.tableHandlers),
+    ...entries("app", discovered.appHandlers),
+    ...entries("site", discovered.staticSiteHandlers),
+    ...entries("queue", discovered.fifoQueueHandlers),
+    ...entries("bucket", discovered.bucketHandlers),
+    ...entries("mailer", discovered.mailerHandlers),
+    ...entries("api", discovered.apiHandlers),
+  ];
+};

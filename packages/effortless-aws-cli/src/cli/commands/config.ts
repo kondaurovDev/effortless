@@ -8,7 +8,8 @@ import { ssm } from "~/aws/clients";
 import { findHandlerFiles, discoverHandlers } from "~/build/bundle";
 import { resolveStage } from "~/aws";
 import { collectRequiredParams, checkMissingParams, type RequiredParam } from "~/deploy/resolve-config";
-import { loadConfig, projectOption, stageOption, regionOption, verboseOption, getPatternsFromConfig } from "~/cli/config";
+import { projectOption, stageOption, regionOption, verboseOption, getPatternsFromConfig } from "~/cli/config";
+import { ProjectConfig } from "~/cli/project-config";
 import { c } from "~/cli/colors";
 
 // ============ Shared helpers ============
@@ -19,7 +20,7 @@ const loadRequiredParams = (
   region: string,
 ) =>
   Effect.gen(function* () {
-    const config = yield* Effect.promise(loadConfig);
+    const { config, projectDir } = yield* ProjectConfig;
     const project = Option.getOrElse(projectOpt, () => config?.name ?? "");
 
     if (!project) {
@@ -33,7 +34,7 @@ const loadRequiredParams = (
       return yield* Effect.fail(new Error("Missing handler patterns"));
     }
 
-    const files = findHandlerFiles(patterns, process.cwd());
+    const files = findHandlerFiles(patterns, projectDir);
     const handlers = discoverHandlers(files);
     const finalStage = config?.stage ?? stage;
     const finalRegion = config?.region ?? region;
@@ -81,8 +82,11 @@ const listCommand = Command.make(
         yield* Console.log(`\n  ${c.green("All parameters are set.")}`);
       }
       yield* Console.log("");
-    }).pipe(Logger.withMinimumLogLevel(LogLevel.Warning))
-).pipe(Command.withDescription("List all config parameters and their status"));
+    }).pipe(
+      Effect.provide(ProjectConfig.Live),
+      Logger.withMinimumLogLevel(LogLevel.Warning)
+    )
+).pipe(Command.withDescription("List all declared config parameters and show which are set vs missing"));
 
 // ============ eff config set <key> ============
 
@@ -95,7 +99,7 @@ const setCommand = Command.make(
   { key: setKeyArg, project: projectOption, stage: stageOption, region: regionOption, verbose: verboseOption },
   ({ key, project: projectOpt, stage, region, verbose }) =>
     Effect.gen(function* () {
-      const config = yield* Effect.promise(loadConfig);
+      const { config } = yield* ProjectConfig;
       const project = Option.getOrElse(projectOpt, () => config?.name ?? "");
 
       if (!project) {
@@ -119,8 +123,11 @@ const setCommand = Command.make(
       }).pipe(Effect.provide(Aws.makeClients({ ssm: { region: finalRegion } })));
 
       yield* Console.log(`\n  ${c.green("✓")} ${c.cyan(ssmPath)} ${c.dim("(SecureString)")}`);
-    }).pipe(Logger.withMinimumLogLevel(LogLevel.Warning))
-).pipe(Command.withDescription("Set a specific config parameter value"));
+    }).pipe(
+      Effect.provide(ProjectConfig.Live),
+      Logger.withMinimumLogLevel(LogLevel.Warning)
+    )
+).pipe(Command.withDescription("Set a config parameter value (stored encrypted in AWS)"));
 
 // ============ eff config (default — interactive setup) ============
 
@@ -175,9 +182,12 @@ const configRootCommand = Command.make(
       } else {
         yield* Console.log(`\n  No parameters created.\n`);
       }
-    }).pipe(Logger.withMinimumLogLevel(LogLevel.Warning))
+    }).pipe(
+      Effect.provide(ProjectConfig.Live),
+      Logger.withMinimumLogLevel(LogLevel.Warning)
+    )
 ).pipe(
-  Command.withDescription("Manage SSM config parameters for your handlers"),
+  Command.withDescription("Manage config values declared via param() in handlers. Run without subcommand to interactively set missing values"),
   Command.withSubcommands([listCommand, setCommand])
 );
 

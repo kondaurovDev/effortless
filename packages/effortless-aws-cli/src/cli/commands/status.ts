@@ -6,15 +6,16 @@ import {
   getAllResourcesByTags,
   groupResourcesByHandler
 } from "../../aws";
-import { findHandlerFiles, discoverHandlers } from "~/build/bundle";
-import { loadConfig, projectOption, stageOption, regionOption, verboseOption, getPatternsFromConfig } from "~/cli/config";
+import { findHandlerFiles, discoverHandlers, flattenHandlers } from "~/build/bundle";
+import { projectOption, stageOption, regionOption, verboseOption, getPatternsFromConfig } from "~/cli/config";
+import { ProjectConfig } from "~/cli/project-config";
 import { c } from "~/cli/colors";
 
 const { lambda, apigatewayv2: apigateway } = Aws;
 
 // ============ Types ============
 
-type HandlerType = "http" | "table" | "app" | "site" | "queue";
+type HandlerType = "http" | "table" | "app" | "site" | "queue" | "api";
 
 type CodeHandler = {
   name: string;
@@ -97,57 +98,10 @@ const getApiUrl = (apiId: string) =>
 const discoverCodeHandlers = (projectDir: string, patterns: string[]): CodeHandler[] => {
   const files = findHandlerFiles(patterns, projectDir);
   const discovered = discoverHandlers(files);
-  const handlers: CodeHandler[] = [];
-
-  for (const { exports } of discovered.httpHandlers) {
-    for (const fn of exports) {
-      handlers.push({
-        name: fn.exportName,
-        type: "http",
-        method: fn.config.method,
-        path: fn.config.path,
-      });
-    }
-  }
-
-  for (const { exports } of discovered.tableHandlers) {
-    for (const fn of exports) {
-      handlers.push({
-        name: fn.exportName,
-        type: "table",
-      });
-    }
-  }
-
-  for (const { exports } of discovered.appHandlers) {
-    for (const fn of exports) {
-      handlers.push({
-        name: fn.exportName,
-        type: "app",
-        path: fn.config.path,
-      });
-    }
-  }
-
-  for (const { exports } of discovered.staticSiteHandlers) {
-    for (const fn of exports) {
-      handlers.push({
-        name: fn.exportName,
-        type: "site",
-      });
-    }
-  }
-
-  for (const { exports } of discovered.fifoQueueHandlers) {
-    for (const fn of exports) {
-      handlers.push({
-        name: fn.exportName,
-        type: "queue",
-      });
-    }
-  }
-
-  return handlers;
+  return flattenHandlers(discovered).map(h => ({
+    name: h.exportName,
+    type: h.type as HandlerType,
+  }));
 };
 
 // ============ AWS discovery ============
@@ -194,6 +148,7 @@ const TYPE_LABELS: Record<string, string> = {
   http: "http",
   table: "table",
   app: "app",
+  api: "api",
   site: "site",
   queue: "queue",
   lambda: "lambda",
@@ -251,7 +206,7 @@ export const statusCommand = Command.make(
   { project: projectOption, stage: stageOption, region: regionOption, verbose: verboseOption },
   ({ project: projectOpt, stage, region, verbose }) =>
     Effect.gen(function* () {
-      const config = yield* Effect.promise(loadConfig);
+      const { config, projectDir } = yield* ProjectConfig;
 
       const project = Option.getOrElse(projectOpt, () => config?.name ?? "");
       const finalStage = config?.stage ?? stage;
@@ -269,7 +224,6 @@ export const statusCommand = Command.make(
       });
 
       const logLevel = verbose ? LogLevel.Debug : LogLevel.Info;
-      const projectDir = process.cwd();
 
       // Discover handlers from code
       const patterns = getPatternsFromConfig(config);
@@ -396,5 +350,5 @@ export const statusCommand = Command.make(
         Effect.provide(clientsLayer),
         Logger.withMinimumLogLevel(logLevel)
       );
-    })
-).pipe(Command.withDescription("Show status of handlers (code vs deployed)"));
+    }).pipe(Effect.provide(ProjectConfig.Live))
+).pipe(Command.withDescription("Compare local handlers with deployed AWS resources. Shows new, deployed, and orphaned handlers"));

@@ -11,7 +11,9 @@ import {
   deleteRole
 } from "../../aws";
 import { deleteResources, type ResourceInfo } from "~/deploy/cleanup";
-import { loadConfig, projectOption, stageOption, regionOption, verboseOption, dryRunOption } from "~/cli/config";
+import { findHandlerFiles, discoverHandlers, flattenHandlers } from "~/build/bundle";
+import { projectOption, stageOption, regionOption, verboseOption, dryRunOption, getPatternsFromConfig } from "~/cli/config";
+import { ProjectConfig } from "~/cli/project-config";
 import { c } from "~/cli/colors";
 
 const handlerOption = Options.text("handler").pipe(
@@ -32,12 +34,16 @@ const rolesOption = Options.boolean("roles").pipe(
   Options.withDescription("Clean up orphaned IAM roles instead of handler resources")
 );
 
+const orphanedOption = Options.boolean("orphaned").pipe(
+  Options.withDescription("Delete only handlers that exist in AWS but not in code")
+);
+
 export const cleanupCommand = Command.make(
   "cleanup",
-  { project: projectOption, stage: stageOption, region: regionOption, handler: handlerOption, layer: layerOption, roles: rolesOption, all: cleanupAllOption, dryRun: dryRunOption, verbose: verboseOption },
-  ({ project: projectOpt, stage, region, handler: handlerOpt, layer: cleanupLayer, roles: cleanupRoles, all: deleteAll, dryRun, verbose }) =>
+  { project: projectOption, stage: stageOption, region: regionOption, handler: handlerOption, layer: layerOption, roles: rolesOption, orphaned: orphanedOption, all: cleanupAllOption, dryRun: dryRunOption, verbose: verboseOption },
+  ({ project: projectOpt, stage, region, handler: handlerOpt, layer: cleanupLayer, roles: cleanupRoles, orphaned: cleanupOrphaned, all: deleteAll, dryRun, verbose }) =>
     Effect.gen(function* () {
-      const config = yield* Effect.promise(loadConfig);
+      const { config, projectDir } = yield* ProjectConfig;
 
       const project = Option.getOrElse(projectOpt, () => config?.name ?? "");
       const finalStage = config?.stage ?? stage;
@@ -90,17 +96,38 @@ export const cleanupCommand = Command.make(
 
         const byHandler = groupResourcesByHandler(resources);
 
-        const handlersToDelete = handlerFilter
-          ? [[handlerFilter, byHandler.get(handlerFilter) ?? []] as const]
-          : Array.from(byHandler.entries());
+        let handlersToDelete: (readonly [string, typeof resources])[];
 
-        if (handlerFilter && !byHandler.has(handlerFilter)) {
-          yield* Console.error(`Handler "${handlerFilter}" not found.`);
-          yield* Console.log("\nAvailable handlers:");
-          for (const [h] of byHandler) {
-            yield* Console.log(`  - ${h}`);
+        if (cleanupOrphaned) {
+          const patterns = getPatternsFromConfig(config);
+          if (!patterns) {
+            yield* Console.error("Error: No 'handlers' patterns in config — cannot determine orphaned handlers");
+            return;
           }
-          return;
+          const files = findHandlerFiles(patterns, projectDir);
+          const discovered = discoverHandlers(files);
+          const codeNames = new Set(flattenHandlers(discovered).map(h => h.exportName));
+          const INTERNAL_HANDLERS = new Set(["api", "platform"]);
+
+          handlersToDelete = Array.from(byHandler.entries())
+            .filter(([name]) => !codeNames.has(name) && !INTERNAL_HANDLERS.has(name));
+
+          if (handlersToDelete.length === 0) {
+            yield* Console.log("No orphaned handlers found.");
+            return;
+          }
+        } else if (handlerFilter) {
+          if (!byHandler.has(handlerFilter)) {
+            yield* Console.error(`Handler "${handlerFilter}" not found.`);
+            yield* Console.log("\nAvailable handlers:");
+            for (const [h] of byHandler) {
+              yield* Console.log(`  - ${h}`);
+            }
+            return;
+          }
+          handlersToDelete = [[handlerFilter, byHandler.get(handlerFilter) ?? []]];
+        } else {
+          handlersToDelete = Array.from(byHandler.entries());
         }
 
         const resourcesToDelete: ResourceInfo[] = [];
@@ -135,9 +162,10 @@ export const cleanupCommand = Command.make(
           return;
         }
 
-        if (!handlerFilter && !deleteAll) {
+        if (!handlerFilter && !cleanupOrphaned && !deleteAll) {
           yield* Console.log("\nTo delete these resources, use one of:");
           yield* Console.log(`  ${c.dim("eff cleanup --all")}                    # Delete all resources`);
+          yield* Console.log(`  ${c.dim("eff cleanup --orphaned")}               # Delete orphaned handlers only`);
           yield* Console.log(`  ${c.dim("eff cleanup --handler <name>")}         # Delete specific handler`);
           yield* Console.log(`  ${c.dim("eff cleanup --dry-run")}                # Preview without deleting`);
           return;
@@ -150,8 +178,8 @@ export const cleanupCommand = Command.make(
         Effect.provide(clientsLayer),
         Logger.withMinimumLogLevel(logLevel)
       );
-    })
-).pipe(Command.withDescription("Delete deployed resources"));
+    }).pipe(Effect.provide(ProjectConfig.Live))
+).pipe(Command.withDescription("Delete deployed resources (Lambda, API Gateway, DynamoDB, IAM roles, layers)"));
 
 const cleanupLayerVersions = (input: { project: string; region: string; deleteAll: boolean; dryRun: boolean }) =>
   Effect.gen(function* () {

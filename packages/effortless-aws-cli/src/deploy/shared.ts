@@ -41,6 +41,8 @@ export type DeployInput = BundleInput & {
   stage?: string;
   region: string;
   exportName?: string;
+  /** Directory with package.json and node_modules (= cwd). Falls back to projectDir. */
+  packageDir?: string;
 };
 
 // ============ Shared utilities ============
@@ -65,21 +67,22 @@ export const ensureLayerAndExternal = (input: {
   project: string;
   stage: string;
   region: string;
-  projectDir: string;
+  /** Directory with package.json and node_modules (may differ from projectDir when root is set) */
+  packageDir: string;
 }) =>
   Effect.gen(function* () {
     const layerResult = yield* ensureLayer({
       project: input.project,
       stage: input.stage,
       region: input.region,
-      projectDir: input.projectDir
+      projectDir: input.packageDir
     });
 
     const prodDeps = layerResult
-      ? yield* readProductionDependencies(input.projectDir)
+      ? yield* readProductionDependencies(input.packageDir)
       : [];
     const { packages: external, warnings: layerWarnings } = prodDeps.length > 0
-      ? yield* Effect.sync(() => collectLayerPackages(input.projectDir, prodDeps))
+      ? yield* Effect.sync(() => collectLayerPackages(input.packageDir, prodDeps))
       : { packages: [] as string[], warnings: [] as string[] };
 
     for (const warning of layerWarnings) {

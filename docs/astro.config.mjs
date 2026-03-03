@@ -71,9 +71,14 @@ export default defineConfig({
           items: [
             { label: "Why Effortless?", slug: "why-effortless" },
             { label: "Installation", slug: "installation" },
+          ],
+        },
+        {
+          label: "Reference",
+          items: [
             { label: "Configuration", slug: "configuration" },
-            { label: "Definitions", slug: "definitions" },
-            { label: "CLI", slug: "cli" },
+            { label: "Handler Definitions", slug: "definitions" },
+            { label: "CLI Commands", slug: "cli" },
           ],
         },
         {

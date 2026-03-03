@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { Command } from "@effect/cli";
+import { CliConfig, Command } from "@effect/cli";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect } from "effect";
 import { createRequire } from "module";
@@ -27,5 +27,6 @@ const cli = Command.run(mainCommand, {
 
 cli(process.argv).pipe(
   Effect.provide(NodeContext.layer),
+  Effect.provide(CliConfig.layer({ showBuiltIns: false, showTypes: false })),
   NodeRuntime.runMain
 );

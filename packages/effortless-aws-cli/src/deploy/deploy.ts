@@ -122,7 +122,8 @@ type PrepareLayerInput = {
   project: string;
   stage: string;
   region: string;
-  projectDir: string;
+  /** Directory with package.json and node_modules (= cwd) */
+  packageDir: string;
 };
 
 const prepareLayer = (input: PrepareLayerInput) =>
@@ -131,7 +132,7 @@ const prepareLayer = (input: PrepareLayerInput) =>
       project: input.project,
       stage: input.stage,
       region: input.region,
-      projectDir: input.projectDir
+      projectDir: input.packageDir
     }).pipe(
       Effect.provide(
         Aws.makeClients({
@@ -141,10 +142,10 @@ const prepareLayer = (input: PrepareLayerInput) =>
     );
 
     const prodDeps = layerResult
-      ? yield* readProductionDependencies(input.projectDir)
+      ? yield* readProductionDependencies(input.packageDir)
       : [];
     const { packages: external, warnings: layerWarnings } = prodDeps.length > 0
-      ? yield* Effect.sync(() => collectLayerPackages(input.projectDir, prodDeps))
+      ? yield* Effect.sync(() => collectLayerPackages(input.packageDir, prodDeps))
       : { packages: [] as string[], warnings: [] as string[] };
 
     for (const warning of layerWarnings) {
@@ -434,16 +435,21 @@ const buildAppTasks = (
   ctx: DeployTaskCtx,
   handlers: DiscoveredHandlers["appHandlers"],
   results: DeployAppResult[],
+  apiId?: string,
 ): Effect.Effect<void, unknown>[] => {
   const tasks: Effect.Effect<void, unknown>[] = [];
   const { region } = ctx.input;
+  const apiOriginDomain = apiId
+    ? `${apiId}.execute-api.${region}.amazonaws.com`
+    : undefined;
   for (const { exports } of handlers) {
     for (const fn of exports) {
       tasks.push(
         Effect.gen(function* () {
           const result = yield* deployApp({
             projectDir: ctx.input.projectDir, project: ctx.input.project,
-            stage: ctx.input.stage, region, fn,
+            stage: ctx.input.stage, region, fn, verbose: ctx.input.verbose,
+            ...(apiOriginDomain ? { apiOriginDomain } : {}),
           }).pipe(Effect.provide(Aws.makeClients({
             lambda: { region }, iam: { region }, s3: { region },
             cloudfront: { region: "us-east-1" },
@@ -476,7 +482,7 @@ const buildStaticSiteTasks = (
         Effect.gen(function* () {
           const result = yield* deployStaticSite({
             projectDir: ctx.input.projectDir, project: ctx.input.project,
-            stage: ctx.input.stage, region, fn,
+            stage: ctx.input.stage, region, fn, verbose: ctx.input.verbose,
             ...(fn.hasHandler ? { file } : {}),
             ...(apiOriginDomain ? { apiOriginDomain } : {}),
           }).pipe(Effect.provide(Aws.makeClients({
@@ -620,11 +626,14 @@ const buildApiTasks = (
 
 export type DeployProjectInput = {
   projectDir: string;
+  /** Directory with package.json and node_modules (= cwd). Falls back to projectDir. */
+  packageDir?: string;
   patterns: string[];
   project: string;
   stage?: string;
   region: string;
   noSites?: boolean;
+  verbose?: boolean;
 };
 
 export type DeployProjectResult = {
@@ -701,12 +710,12 @@ export const deployProject = (input: DeployProjectInput) =>
     const bucketNameMap = buildBucketNameMap(bucketHandlers, input.project, stage);
     const mailerDomainMap = buildMailerDomainMap(mailerHandlers);
 
-    // Prepare layer
+    // Prepare layer (uses packageDir for package.json/node_modules, falls back to projectDir)
     const { layerArn, layerVersion, layerStatus, external } = yield* prepareLayer({
       project: input.project,
       stage: stage,
       region: input.region,
-      projectDir: input.projectDir
+      packageDir: input.packageDir ?? input.projectDir
     });
 
     if (layerArn && layerStatus) {
@@ -721,8 +730,11 @@ export const deployProject = (input: DeployProjectInput) =>
     const staticSitesNeedApi = !input.noSites && staticSiteHandlers.some(
       ({ exports }) => exports.some(fn => fn.routePatterns.length > 0)
     );
+    const appsNeedApi = appHandlers.some(
+      ({ exports }) => exports.some(fn => fn.routePatterns.length > 0)
+    );
 
-    if (totalHttpHandlers > 0 || totalApiHandlers > 0 || staticSitesNeedApi) {
+    if (totalHttpHandlers > 0 || totalApiHandlers > 0 || staticSitesNeedApi || appsNeedApi) {
       const tagCtx: TagContext = {
         project: input.project,
         stage: stage,
@@ -788,7 +800,7 @@ export const deployProject = (input: DeployProjectInput) =>
     const tasks = [
       ...(apiId ? buildHttpTasks(ctx, httpHandlers, apiId, httpResults) : []),
       ...buildTableTasks(ctx, tableHandlers, tableResults),
-      ...buildAppTasks(ctx, appHandlers, appResults),
+      ...buildAppTasks(ctx, appHandlers, appResults, apiId),
       ...(input.noSites ? [] : buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults, apiId)),
       ...buildFifoQueueTasks(ctx, fifoQueueHandlers, fifoQueueResults),
       ...buildBucketTasks(ctx, bucketHandlers, bucketResults),

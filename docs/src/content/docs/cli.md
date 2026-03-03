@@ -38,7 +38,7 @@ All commands read project name, stage, and region from `effortless.config.ts` �
 
 ## deploy
 
-Deploy handlers to AWS.
+Deploy handlers to AWS. See [Architecture → Deploy Algorithm](/architecture/#deploy-algorithm) for the full flow.
 
 ```bash
 eff deploy [target] [options]
@@ -84,7 +84,7 @@ If you remove a handler from your code, the API Gateway route will be cleaned up
 
 ## status
 
-Compare handlers in your code with what's deployed in AWS.
+Compare handlers in your code with what's deployed in AWS. See [Architecture → Resource Discovery](/architecture/#tag-based-discovery-no-state-files) for how resources are found.
 
 ```bash
 eff status [options]
@@ -157,7 +157,7 @@ Lambda metadata (request IDs, START/END/REPORT lines) is stripped for readabilit
 
 ## cleanup
 
-Delete deployed resources.
+Delete deployed resources. See [Architecture → Resource Discovery](/architecture/#tag-based-discovery-no-state-files) for how resources are found by tags.
 
 ```bash
 eff cleanup [options]
@@ -200,7 +200,7 @@ eff cleanup --roles --all
 
 ## config
 
-Manage SSM Parameter Store values used by your handlers.
+Manage SSM Parameter Store values used by your handlers. See [Architecture → Three-Phase Pattern](/architecture/#three-phase-pattern) for how config params flow from code to runtime.
 
 Handlers declare config parameters via `config: { stripeKey: param("stripe/secret-key") }`. The CLI discovers all declared parameters from your code and helps you create, list, and update them in AWS.
 
@@ -281,9 +281,9 @@ eff config set stripe/secret-key --stage prod
 
 ## layer
 
-Show or build the dependency layer.
+Show or build the dependency layer. See [Architecture → Lambda Layer](/architecture/#lambda-layer-production-dependencies) for how layers are built internally.
 
-Effortless automatically creates a shared Lambda layer from your `dependencies` in `package.json`. This command shows what will be included and optionally builds it locally for debugging.
+Effortless automatically creates a shared Lambda layer from your `dependencies` in `package.json`. Only rebuilt when dependencies actually change.
 
 ```bash
 # Show layer info (default)
@@ -300,3 +300,7 @@ eff layer --build
 | `--build` | | Build layer directory locally | |
 | `--output <dir>` | `-o` | Output directory (with `--build`) | `".effortless"` |
 | `--verbose` | `-v` | Show all packages | |
+
+:::note
+The CLI warns if dev tools (`typescript`, `@types/*`, `eslint`, etc.) are in `dependencies` — they bloat the layer. It also warns if `dependencies` is empty while `devDependencies` is not.
+:::

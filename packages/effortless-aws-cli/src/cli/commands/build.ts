@@ -5,7 +5,8 @@ import * as fs from "fs";
 
 import { bundle, extractConfigs, extractTableConfigs, findHandlerFiles, discoverHandlers } from "~/build/bundle";
 import { collectLayerPackages, readProductionDependencies } from "../../aws";
-import { loadConfig, verboseOption, outputOption, getPatternsFromConfig } from "~/cli/config";
+import { verboseOption, outputOption, getPatternsFromConfig } from "~/cli/config";
+import { ProjectConfig } from "~/cli/project-config";
 import { c } from "~/cli/colors";
 
 const buildFileArg = Args.file({ name: "file", exists: "yes" }).pipe(
@@ -26,8 +27,7 @@ export const buildCommand = Command.make(
   { file: buildFileArg, all: buildAllOption, table: buildTableOption, output: outputOption, verbose: verboseOption },
   ({ file, all, table, output, verbose }) =>
     Effect.gen(function* () {
-      const config = yield* Effect.promise(loadConfig);
-      const projectDir = process.cwd();
+      const { config, projectDir } = yield* ProjectConfig;
       const outputDir = path.isAbsolute(output) ? output : path.resolve(projectDir, output);
 
       if (!fs.existsSync(outputDir)) {
@@ -178,5 +178,5 @@ export const buildCommand = Command.make(
             yield* Console.log(`\nOutput directory: ${outputDir}`);
           }),
       });
-    })
+    }).pipe(Effect.provide(ProjectConfig.Live))
 ).pipe(Command.withDescription("Build handler bundles locally (for debugging)"));

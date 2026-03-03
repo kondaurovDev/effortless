@@ -493,6 +493,19 @@ ensureLayer()
 
 Layers are versioned by a SHA-256 hash of all `package@version` pairs. If the hash matches an existing published layer version, it's reused — no re-upload needed. This makes deploys fast when only handler code changes.
 
+### Dependency Warnings
+
+The CLI warns about common `package.json` mistakes that affect the layer:
+
+- **Dev packages in `dependencies`** — packages like `typescript`, `@types/*`, `eslint`, `vitest`, `tsup` in `dependencies` will be included in the layer, bloating its size unnecessarily. Move them to `devDependencies`.
+- **Empty `dependencies`** — if `dependencies` is empty but `devDependencies` has packages, the layer will be empty. Runtime packages must be in `dependencies` to be included.
+
+These warnings appear during `eff deploy` and `eff layer`.
+
+### Monorepo Note
+
+When using the `root` config option, the layer reads `package.json` and `node_modules` from the **directory where you run the CLI** (`cwd`), not from the resolved `root`. This ensures the correct project-level dependencies are used, not workspace-root dependencies.
+
 ### AWS SDK Handling
 
 AWS SDK v3 packages (`@aws-sdk/*`, `@smithy/*`) are **always excluded** from both the layer and the handler bundle. They're provided by the Lambda Node.js runtime, which keeps the layer size small and avoids version conflicts.

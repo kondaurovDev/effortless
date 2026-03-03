@@ -97,6 +97,81 @@ export const readProductionDependencies = (projectDir: string) =>
     return Object.keys(pkg.dependencies ?? {});
   });
 
+/** Packages that are almost certainly dev-only and shouldn't be in `dependencies` */
+const DEV_ONLY_PACKAGES = new Set([
+  "typescript",
+  "ts-node",
+  "tsx",
+  "vitest",
+  "jest",
+  "mocha",
+  "eslint",
+  "prettier",
+  "tsup",
+  "esbuild",
+  "webpack",
+  "rollup",
+  "vite",
+  "turbo",
+  "husky",
+  "lint-staged",
+  "commitlint",
+  "nodemon",
+  "ts-jest",
+  "concurrently",
+  "rimraf",
+]);
+
+/** Prefixes that indicate dev-only packages */
+const DEV_ONLY_PREFIXES = [
+  "@types/",
+  "@typescript-eslint/",
+  "@eslint/",
+  "eslint-plugin-",
+  "eslint-config-",
+  "@vitest/",
+  "@jest/",
+];
+
+/**
+ * Check for common dependency misplacements in package.json.
+ * Returns warnings for dev packages in `dependencies` (bloats layer)
+ * and runtime-looking packages in `devDependencies` (missing from layer).
+ */
+export const checkDependencyWarnings = (projectDir: string) =>
+  Effect.gen(function* () {
+    const pkgPath = path.join(projectDir, "package.json");
+    const content = yield* Effect.tryPromise({
+      try: () => fs.readFile(pkgPath, "utf-8"),
+      catch: () => Effect.succeed(null)
+    });
+    if (!content) return [];
+
+    const pkg = JSON.parse(content as string);
+    const deps = Object.keys(pkg.dependencies ?? {});
+    const devDeps = Object.keys(pkg.devDependencies ?? {});
+    const warnings: string[] = [];
+
+    // Check for dev-only packages in `dependencies` (bloats layer)
+    const devInProd = deps.filter(d =>
+      DEV_ONLY_PACKAGES.has(d) || DEV_ONLY_PREFIXES.some(p => d.startsWith(p))
+    );
+    if (devInProd.length > 0) {
+      warnings.push(
+        `These packages are in "dependencies" but look like dev tools (they will bloat the Lambda layer): ${devInProd.join(", ")}. Consider moving them to "devDependencies".`
+      );
+    }
+
+    // Check for empty dependencies with non-empty devDependencies
+    if (deps.length === 0 && devDeps.length > 0) {
+      warnings.push(
+        `"dependencies" is empty but "devDependencies" has ${devDeps.length} package(s). Runtime packages must be in "dependencies" to be included in the Lambda layer.`
+      );
+    }
+
+    return warnings;
+  });
+
 
 /**
  * Get the real path of a package in node_modules, following symlinks (pnpm support)
@@ -432,6 +507,14 @@ export const getExistingLayerByHash = (layerName: string, expectedHash: string) 
  */
 export const ensureLayer = (config: LayerConfig) =>
   Effect.gen(function* () {
+    // Warn about common dependency misplacements
+    const depWarnings = yield* checkDependencyWarnings(config.projectDir).pipe(
+      Effect.catchAll(() => Effect.succeed([] as string[]))
+    );
+    for (const w of depWarnings) {
+      yield* Effect.logWarning(`[layer] ${w}`);
+    }
+
     const dependencies = yield* readProductionDependencies(config.projectDir).pipe(
       Effect.catchAll(() => Effect.succeed([] as string[]))
     );

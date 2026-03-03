@@ -56,6 +56,39 @@ stage: "dev"              // default
 
 Override per deploy with `eff deploy --stage prod`. This lets you run multiple environments in the same AWS account without conflicts.
 
+### `root`
+
+Project root directory. All relative paths (handler patterns, static files, etc.) are resolved from this directory.
+
+```typescript
+root: ".."   // resolve handlers from the parent directory
+```
+
+Useful in **monorepo setups** where `effortless.config.ts` lives in a subdirectory (e.g., `infra/`) but handler files are elsewhere:
+
+```
+monorepo/
+  src/
+    handlers/
+      api.ts
+  infra/
+    effortless.config.ts    ← root: ".."
+    package.json            ← dependencies for the Lambda layer
+```
+
+```typescript
+// infra/effortless.config.ts
+export default defineConfig({
+  name: "my-service",
+  root: "..",                          // resolve paths from monorepo root
+  handlers: ["src/handlers/**/*.ts"],  // relative to root
+});
+```
+
+**Important:** `root` only affects handler file resolution. The Lambda layer reads `package.json` and `node_modules` from the directory where you run the CLI (`cwd`), not from `root`. This means your runtime dependencies should be in `infra/package.json`, not in the monorepo root.
+
+Default: `"."` (current working directory).
+
 ### `handlers`
 
 Glob patterns or directory paths to scan for handler exports. Used by `eff deploy` (without a file argument) to auto-discover all handlers.
@@ -104,6 +137,7 @@ import { defineConfig } from "effortless-aws";
 
 export default defineConfig({
   name: "my-service",
+  root: "..",                   // optional, for monorepo setups
   region: "eu-central-1",
   stage: "dev",
   handlers: ["src/**/*.ts"],

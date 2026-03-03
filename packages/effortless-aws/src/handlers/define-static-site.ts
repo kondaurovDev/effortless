@@ -1,7 +1,5 @@
-import type { HttpHandler } from "./define-http";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyHttpHandler = HttpHandler<any, any, any, any, any>;
+/** Any branded handler that deploys to API Gateway (HttpHandler, ApiHandler, etc.) */
+type AnyRoutableHandler = { readonly __brand: string };
 
 /** Simplified request object passed to middleware */
 export type MiddlewareRequest = {
@@ -51,7 +49,7 @@ export type StaticSiteConfig = {
   /** CloudFront route overrides: path patterns forwarded to API Gateway instead of S3.
    * Keys are CloudFront path patterns (e.g., "/api/*"), values are HTTP handlers.
    * Example: `routes: { "/api/*": api }` */
-  routes?: Record<string, AnyHttpHandler>;
+  routes?: Record<string, AnyRoutableHandler>;
   /** Custom 404 error page path relative to `dir` (e.g. "404.html").
    * For non-SPA sites only. If not set, a default page is generated automatically. */
   errorPage?: string;

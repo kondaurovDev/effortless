@@ -82,7 +82,7 @@ export const deploy = (input: DeployInput) =>
       project: input.project,
       stage: tagCtx.stage,
       region: input.region,
-      projectDir: input.projectDir
+      packageDir: input.packageDir ?? input.projectDir
     });
 
     // Deploy Lambda
@@ -149,7 +149,7 @@ export const deployAll = (input: DeployInput) =>
       project: input.project,
       stage: tagCtx.stage,
       region: input.region,
-      projectDir: input.projectDir
+      packageDir: input.packageDir ?? input.projectDir
     });
 
     // Create single API Gateway for project
