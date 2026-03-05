@@ -11,6 +11,7 @@ Write all code, comments, commit messages, and documentation in English.
   - `effortless-aws` — `packages/effortless-aws` (runtime library)
   - `@effortless-aws/cli` — `packages/effortless-aws-cli` (CLI tool)
 - Do NOT edit `package.json` version directly.
+- Never use `major` bump in changesets unless the user explicitly asks for it. Default to `minor` for new features and breaking changes, `patch` for fixes.
 - Publishing is handled by GitHub Actions — never run `changeset version` or `changeset publish` locally. Just push to main.
 
 ## Quality
