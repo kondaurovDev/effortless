@@ -4,7 +4,7 @@ import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import type { ExtractedStaticSiteFunction } from "~/build/bundle";
-import { bundle, zip } from "~/build/bundle";
+import { bundleMiddleware, zip } from "~/build/bundle";
 import {
   Aws,
   makeTags,
@@ -57,11 +57,10 @@ const deployMiddlewareLambda = (input: {
   stage: string;
   handlerName: string;
   file: string;
-  exportName: string;
   tagCtx: TagContext;
 }) =>
   Effect.gen(function* () {
-    const { projectDir, project, stage, handlerName, file, exportName, tagCtx } = input;
+    const { projectDir, project, stage, handlerName, file, tagCtx } = input;
     const middlewareName = `${handlerName}-middleware`;
 
     yield* Effect.logDebug(`Deploying middleware Lambda@Edge: ${middlewareName}`);
@@ -74,13 +73,8 @@ const deployMiddlewareLambda = (input: {
       makeTags(tagCtx, "iam-role")
     );
 
-    // 2. Bundle middleware code
-    const bundled = yield* bundle({
-      projectDir,
-      file,
-      exportName,
-      type: "staticSite",
-    });
+    // 2. Bundle middleware code (standalone — extracts only the middleware fn via AST)
+    const bundled = yield* bundleMiddleware({ projectDir, file });
     const code = yield* zip({ content: bundled });
 
     // 3. Deploy Lambda to us-east-1 (x86_64, no env vars, no layers)
@@ -245,7 +239,7 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
       // Lambda@Edge handles both middleware logic and URL rewrite
       const result = yield* deployMiddlewareLambda({
         projectDir, project, stage, handlerName,
-        file: input.file, exportName, tagCtx,
+        file: input.file, tagCtx,
       }).pipe(
         Effect.provide(Aws.makeClients({ iam: { region: "us-east-1" } }))
       );

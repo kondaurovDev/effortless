@@ -53,11 +53,9 @@ const isRedirect = (result: MiddlewareResult): result is MiddlewareRedirect =>
 const isDeny = (result: MiddlewareResult): result is { status: 403; body?: string } =>
   result != null && "status" in result && result.status === 403;
 
-export const wrapMiddleware = (handler: StaticSiteHandler) => {
-  const middleware = (handler as any).__spec.middleware as (
-    request: MiddlewareRequest
-  ) => Promise<MiddlewareResult> | MiddlewareResult;
-
+export const wrapMiddlewareFn = (
+  middleware: (request: MiddlewareRequest) => Promise<MiddlewareResult> | MiddlewareResult
+) => {
   return async (event: CfEvent) => {
     const cfRequest = event.Records[0].cf.request;
 
@@ -109,4 +107,11 @@ export const wrapMiddleware = (handler: StaticSiteHandler) => {
       };
     }
   };
+};
+
+export const wrapMiddleware = (handler: StaticSiteHandler) => {
+  const middleware = (handler as any).__spec.middleware as (
+    request: MiddlewareRequest
+  ) => Promise<MiddlewareResult> | MiddlewareResult;
+  return wrapMiddlewareFn(middleware);
 };

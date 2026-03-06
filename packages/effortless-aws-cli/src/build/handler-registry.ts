@@ -332,6 +332,81 @@ export const extractHandlerConfigs = <T>(source: string, type: HandlerType): Ext
 
 // ============ Entry point generation ============
 
+/**
+ * Generate a standalone middleware entry point that extracts only the middleware
+ * function from the handler definition via AST, avoiding bundling the entire handler
+ * and its dependencies (which would pull in heavy modules like HTTP clients).
+ */
+export const generateMiddlewareEntryPoint = (
+  source: string,
+  runtimeDir: string
+): { entryPoint: string; exportName: string } => {
+  const sourceFile = parseSource(source);
+
+  // Collect all import declarations (preserving original paths)
+  const imports = sourceFile.getImportDeclarations()
+    .map(d => d.getText())
+    .join("\n");
+
+  // Find the staticSite export and extract the middleware function text
+  const defineFn = handlerRegistry.staticSite.defineFn;
+  let middlewareFnText: string | undefined;
+  let exportName: string | undefined;
+
+  // Check default export
+  const exportDefault = sourceFile.getExportAssignment(e => !e.isExportEquals());
+  if (exportDefault) {
+    const expr = exportDefault.getExpression();
+    if (expr.getKind() === SyntaxKind.CallExpression) {
+      const callExpr = expr.asKindOrThrow(SyntaxKind.CallExpression);
+      if (callExpr.getExpression().getText() === defineFn) {
+        const args = callExpr.getArguments();
+        const firstArg = args[0];
+        if (firstArg?.getKind() === SyntaxKind.ObjectLiteralExpression) {
+          middlewareFnText = extractPropertyFromObject(firstArg as ObjectLiteralExpression, "middleware");
+          exportName = "default";
+        }
+      }
+    }
+  }
+
+  // Check named exports
+  if (!middlewareFnText) {
+    sourceFile.getVariableStatements().forEach(stmt => {
+      if (middlewareFnText || !stmt.isExported()) return;
+      stmt.getDeclarations().forEach(decl => {
+        if (middlewareFnText) return;
+        const init = decl.getInitializer();
+        if (!init || init.getKind() !== SyntaxKind.CallExpression) return;
+        const callExpr = init.asKindOrThrow(SyntaxKind.CallExpression);
+        if (callExpr.getExpression().getText() !== defineFn) return;
+        const args = callExpr.getArguments();
+        const firstArg = args[0];
+        if (firstArg?.getKind() === SyntaxKind.ObjectLiteralExpression) {
+          middlewareFnText = extractPropertyFromObject(firstArg as ObjectLiteralExpression, "middleware");
+          exportName = decl.getName();
+        }
+      });
+    });
+  }
+
+  if (!middlewareFnText || !exportName) {
+    throw new Error("Could not extract middleware function from source");
+  }
+
+  const wrapperPath = runtimeDir
+    ? handlerRegistry.staticSite.wrapperPath.replace("~/runtime", runtimeDir)
+    : handlerRegistry.staticSite.wrapperPath;
+
+  const entryPoint = `${imports}
+import { wrapMiddlewareFn } from "${wrapperPath}";
+const __middleware = ${middlewareFnText};
+export const handler = wrapMiddlewareFn(__middleware);
+`;
+
+  return { entryPoint, exportName };
+};
+
 export const generateEntryPoint = (
   sourcePath: string,
   exportName: string,

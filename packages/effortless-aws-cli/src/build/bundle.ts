@@ -5,7 +5,7 @@ import * as path from "path";
 import { createRequire } from "module";
 import archiver from "archiver";
 import { globSync } from "glob";
-import { generateEntryPoint, extractHandlerConfigs, type HandlerType, type ExtractedConfig } from "./handler-registry";
+import { generateEntryPoint, generateMiddlewareEntryPoint, extractHandlerConfigs, type HandlerType, type ExtractedConfig } from "./handler-registry";
 import type { TableConfig, AppConfig, StaticSiteConfig, FifoQueueConfig, BucketConfig, MailerConfig, ApiConfig } from "effortless-aws";
 
 export type BundleInput = {
@@ -91,6 +91,49 @@ export const bundle = (input: BundleInput & { exportName?: string; external?: st
     const output = result.outputFiles?.[0];
     if (!output) {
       throw new Error("esbuild produced no output");
+    }
+    return output.text;
+  });
+
+/**
+ * Bundle middleware as a standalone Lambda@Edge function.
+ * Extracts only the middleware function from the handler source via AST,
+ * so the bundle doesn't pull in unrelated dependencies (HTTP clients, etc.).
+ */
+export const bundleMiddleware = (input: { projectDir: string; file: string }) =>
+  Effect.gen(function* () {
+    const absFile = path.isAbsolute(input.file)
+      ? input.file
+      : path.resolve(input.projectDir, input.file);
+    const source = fsSync.readFileSync(absFile, "utf-8");
+    const sourceDir = path.dirname(absFile);
+
+    const { entryPoint } = generateMiddlewareEntryPoint(source, runtimeDir);
+
+    const awsExternals = ["@aws-sdk/*", "@smithy/*"];
+
+    const result = yield* Effect.tryPromise({
+      try: () => esbuild.build({
+        stdin: {
+          contents: entryPoint,
+          loader: "ts",
+          resolveDir: sourceDir,
+        },
+        bundle: true,
+        platform: "node",
+        target: "node22",
+        write: false,
+        minify: false,
+        sourcemap: false,
+        format: "esm",
+        external: awsExternals,
+      }),
+      catch: (error) => new Error(`esbuild failed (middleware): ${error}`)
+    });
+
+    const output = result.outputFiles?.[0];
+    if (!output) {
+      throw new Error("esbuild produced no output for middleware");
     }
     return output.text;
   });
