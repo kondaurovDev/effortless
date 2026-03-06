@@ -1,5 +1,14 @@
 # @effortless-aws/cli
 
+## 0.9.2
+
+### Patch Changes
+
+- [`2d82fd2`](https://github.com/kondaurovDev/effortless-aws/commit/2d82fd27953e8ef1cf1151562253cf64ea73683e) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - fix(auth): resolve defineAuth config from shorthand properties and fix crypto import for ESM bundles
+
+- Updated dependencies [[`2d82fd2`](https://github.com/kondaurovDev/effortless-aws/commit/2d82fd27953e8ef1cf1151562253cf64ea73683e)]:
+  - effortless-aws@0.24.1
+
 ## 0.9.1
 
 ### Patch Changes
