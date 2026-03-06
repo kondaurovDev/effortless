@@ -80,6 +80,8 @@ export const bundle = (input: BundleInput & { exportName?: string; external?: st
     const nodeExternals = builtinModules.flatMap(m => [m, `node:${m}`]);
     const allExternals = [...new Set([...awsExternals, ...nodeExternals, ...externals])];
 
+    const format = input.format ?? "esm";
+
     const result = yield* Effect.tryPromise({
       try: () => esbuild.build({
         stdin: {
@@ -93,9 +95,11 @@ export const bundle = (input: BundleInput & { exportName?: string; external?: st
         write: false,
         minify: false,
         sourcemap: false,
-        format: input.format ?? "esm",
+        format,
         external: allExternals,
         metafile: true,
+        // CJS packages bundled into ESM need a `require` function for Node.js builtins
+        ...(format === "esm" ? { banner: { js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);" } } : {}),
       }),
       catch: (error) => new Error(`esbuild failed: ${error}`)
     });
