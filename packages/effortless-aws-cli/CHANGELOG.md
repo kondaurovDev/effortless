@@ -1,5 +1,18 @@
 # @effortless-aws/cli
 
+## 0.8.0
+
+### Minor Changes
+
+- [`5ab838f`](https://github.com/kondaurovDev/effortless-aws/commit/5ab838f33cb6aaa8f223fe830fa7b4a2cf2fe3f5) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Add update notification that checks npm registry and shows a message when a newer version is available
+
+### Patch Changes
+
+- [`8a4241f`](https://github.com/kondaurovDev/effortless-aws/commit/8a4241fd1d28759b720e3eab9c917f952624fbfd) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - fix: bundle middleware Lambda@Edge standalone to avoid pulling in unrelated dependencies
+
+- Updated dependencies [[`8a4241f`](https://github.com/kondaurovDev/effortless-aws/commit/8a4241fd1d28759b720e3eab9c917f952624fbfd)]:
+  - effortless-aws@0.23.1
+
 ## 0.7.0
 
 ### Minor Changes

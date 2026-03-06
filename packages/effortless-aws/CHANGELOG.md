@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.23.1
+
+### Patch Changes
+
+- [`8a4241f`](https://github.com/kondaurovDev/effortless-aws/commit/8a4241fd1d28759b720e3eab9c917f952624fbfd) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - fix: bundle middleware Lambda@Edge standalone to avoid pulling in unrelated dependencies
+
 ## 0.23.0
 
 ### Minor Changes
