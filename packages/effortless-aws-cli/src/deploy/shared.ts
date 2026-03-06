@@ -20,12 +20,14 @@ export type DeployResult = {
   exportName: string;
   url: string;
   functionArn: string;
+  bundleSize?: number;
 };
 
 export type DeployTableResult = {
   exportName: string;
   functionArn: string;
   status: LambdaStatus;
+  bundleSize?: number;
   tableArn: string;
   streamArn: string;
 };
@@ -43,6 +45,14 @@ export type DeployInput = BundleInput & {
   exportName?: string;
   /** Directory with package.json and node_modules (= cwd). Falls back to projectDir. */
   packageDir?: string;
+  extraNodeModules?: string[];
+};
+
+const formatBytes = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes}B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)}KB`;
+  return `${(kb / 1024).toFixed(2)}MB`;
 };
 
 // ============ Shared utilities ============
@@ -69,20 +79,22 @@ export const ensureLayerAndExternal = (input: {
   region: string;
   /** Directory with package.json and node_modules (may differ from projectDir when root is set) */
   packageDir: string;
+  extraNodeModules?: string[];
 }) =>
   Effect.gen(function* () {
     const layerResult = yield* ensureLayer({
       project: input.project,
       stage: input.stage,
       region: input.region,
-      projectDir: input.packageDir
+      projectDir: input.packageDir,
+      extraNodeModules: input.extraNodeModules
     });
 
     const prodDeps = layerResult
       ? yield* readProductionDependencies(input.packageDir)
       : [];
     const { packages: external, warnings: layerWarnings } = prodDeps.length > 0
-      ? yield* Effect.sync(() => collectLayerPackages(input.packageDir, prodDeps))
+      ? yield* Effect.sync(() => collectLayerPackages(input.packageDir, prodDeps, input.extraNodeModules))
       : { packages: [] as string[], warnings: [] as string[] };
 
     for (const warning of layerWarnings) {
@@ -158,7 +170,7 @@ export const deployCoreLambda = ({
       makeTags(tagCtx, "iam-role")
     );
 
-    const bundled = yield* bundle({
+    const bundleResult = yield* bundle({
       ...input,
       exportName,
       ...(bundleType ? { type: bundleType } : {}),
@@ -167,7 +179,16 @@ export const deployCoreLambda = ({
     const staticFiles = staticGlobs && staticGlobs.length > 0
       ? resolveStaticFiles(staticGlobs, input.projectDir)
       : undefined;
-    const code = yield* zip({ content: bundled, staticFiles });
+    const bundleSize = Buffer.byteLength(bundleResult.code, "utf-8");
+
+    // Log bundle composition when size exceeds 500KB
+    if (bundleResult.topModules && bundleSize > 500 * 1024) {
+      const top = bundleResult.topModules.slice(0, 10);
+      const lines = top.map(m => `  ${formatBytes(m.bytes).padStart(8)}  ${m.path}`).join("\n");
+      yield* Effect.logWarning(`Bundle "${handlerName}" is ${formatBytes(bundleSize)} — top modules:\n${lines}`);
+    }
+
+    const code = yield* zip({ content: bundleResult.code, staticFiles });
 
     const environment: Record<string, string> = {
       EFF_PROJECT: input.project,
@@ -190,5 +211,5 @@ export const deployCoreLambda = ({
       environment
     });
 
-    return { functionArn, status, tagCtx };
+    return { functionArn, status, tagCtx, bundleSize };
   });

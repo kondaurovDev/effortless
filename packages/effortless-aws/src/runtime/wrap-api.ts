@@ -1,5 +1,6 @@
 import type { ApiHandler } from "../handlers/define-api";
 import type { ContentType, ResponseStream } from "../handlers/shared";
+import { AUTH_COOKIE_NAME } from "../handlers/auth";
 import { createHandlerRuntime } from "./handler-utils";
 
 const CONTENT_TYPE_MAP: Record<ContentType, string> = {
@@ -141,8 +142,16 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
 
       const input = { method: req.method, path: req.path, query: req.query, body: req.body };
 
+      // Extract auth cookie from request headers
+      const cookieHeader = req.headers["cookie"] ?? req.headers["Cookie"] ?? "";
+      let authCookie: string | undefined;
+      if (cookieHeader) {
+        const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${AUTH_COOKIE_NAME}=([^;]+)`));
+        if (match) authCookie = match[1];
+      }
+
       // Resolve shared args (ctx, deps, config, files)
-      const sharedArgs = await rt.commonArgs();
+      const sharedArgs = await rt.commonArgs(authCookie);
 
       // GET / HEAD routing
       if (req.method === "GET" || req.method === "HEAD") {

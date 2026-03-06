@@ -204,6 +204,21 @@ export const publishVersion = (functionName: string) =>
     };
   });
 
+/** Allow CloudFront replicator to read the function for Lambda@Edge distribution. */
+export const ensureEdgePermission = (functionName: string) =>
+  lambda.make("add_permission", {
+    FunctionName: functionName,
+    StatementId: "replicator",
+    Action: "lambda:GetFunction",
+    Principal: "replicator.lambda.amazonaws.com",
+  }).pipe(
+    Effect.catchIf(
+      e => e._tag === "LambdaError" && e.is("ResourceConflictException"),
+      () => Effect.logDebug(`Replicator permission already exists for ${functionName}`)
+    ),
+    Effect.asVoid,
+  );
+
 // ============ Function URL ============
 
 const DEFAULT_CORS = {

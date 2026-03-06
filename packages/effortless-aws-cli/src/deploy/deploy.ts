@@ -13,8 +13,10 @@ import {
   addFunctionUrlPublicAccess,
 } from "../aws";
 import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "~/build/bundle";
-import type { ParamEntry } from "~/build/handler-registry";
-import { collectRequiredParams, checkMissingParams } from "./resolve-config";
+import type { SecretEntry, GenerateSpec } from "~/build/handler-registry";
+import * as crypto from "crypto";
+import { ssm } from "~/aws/clients";
+import { collectRequiredSecrets, checkMissingSecrets, collectAuthSecret, fetchAuthSecretValue } from "./resolve-config";
 
 // Re-export from shared
 export {
@@ -93,11 +95,19 @@ const createLiveProgress = (manifest: HandlerManifest) => {
     return c.dim(`${sec}s`);
   };
 
-  return (name: string, type: string, status: StepStatus): Effect.Effect<void> =>
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes}B`;
+    const kb = bytes / 1024;
+    if (kb < 1024) return `${kb.toFixed(0)}KB`;
+    return `${(kb / 1024).toFixed(1)}MB`;
+  };
+
+  return (name: string, type: string, status: StepStatus, bundleSize?: number): Effect.Effect<void> =>
     Effect.sync(() => {
       const key = `${name}:${type}`;
       results.set(key, status);
-      const line = `  ${name} ${c.dim(`(${type})`)} ${statusLabel(status)} ${formatDuration()}`;
+      const sizeInfo = bundleSize ? ` ${c.dim(formatSize(bundleSize))}` : "";
+      const line = `  ${name} ${c.dim(`(${type})`)} ${statusLabel(status)}${sizeInfo} ${formatDuration()}`;
 
       if (isTTY) {
         const idx = lineIndex.get(key) ?? 0;
@@ -107,7 +117,7 @@ const createLiveProgress = (manifest: HandlerManifest) => {
           clearInterval(timer);
         }
       } else {
-        process.stdout.write(`  ${c.dim(`[${results.size}/${manifest.length}]`)} ${name} ${c.dim(`(${type})`)} ${statusLabel(status)} ${formatDuration()}\n`);
+        process.stdout.write(`  ${c.dim(`[${results.size}/${manifest.length}]`)} ${name} ${c.dim(`(${type})`)} ${statusLabel(status)}${sizeInfo} ${formatDuration()}\n`);
       }
     });
 };
@@ -122,6 +132,7 @@ type PrepareLayerInput = {
   region: string;
   /** Directory with package.json and node_modules (= cwd) */
   packageDir: string;
+  extraNodeModules?: string[];
 };
 
 const prepareLayer = (input: PrepareLayerInput) =>
@@ -130,7 +141,8 @@ const prepareLayer = (input: PrepareLayerInput) =>
       project: input.project,
       stage: input.stage,
       region: input.region,
-      projectDir: input.packageDir
+      projectDir: input.packageDir,
+      extraNodeModules: input.extraNodeModules
     }).pipe(
       Effect.provide(
         Aws.makeClients({
@@ -143,7 +155,7 @@ const prepareLayer = (input: PrepareLayerInput) =>
       ? yield* readProductionDependencies(input.packageDir)
       : [];
     const { packages: external, warnings: layerWarnings } = prodDeps.length > 0
-      ? yield* Effect.sync(() => collectLayerPackages(input.packageDir, prodDeps))
+      ? yield* Effect.sync(() => collectLayerPackages(input.packageDir, prodDeps, input.extraNodeModules))
       : { packages: [] as string[], warnings: [] as string[] };
 
     for (const warning of layerWarnings) {
@@ -367,15 +379,24 @@ const SSM_PERMISSIONS = [
  * Resolve param entries to environment variables and IAM permissions.
  * SSM path convention: /${project}/${stage}/${key}
  */
-const resolveParams = (
-  paramEntries: ParamEntry[],
+/** Execute a GenerateSpec to produce a secret value at deploy time. */
+const executeGenerateSpec = (spec: GenerateSpec): string => {
+  switch (spec.type) {
+    case "hex": return crypto.randomBytes(spec.bytes).toString("hex");
+    case "base64": return crypto.randomBytes(spec.bytes).toString("base64url");
+    case "uuid": return crypto.randomUUID();
+  }
+};
+
+const resolveSecrets = (
+  secretEntries: SecretEntry[],
   project: string,
   stage: string
 ): { paramsEnv: Record<string, string>; paramsPermissions: readonly string[] } | undefined => {
-  if (paramEntries.length === 0) return undefined;
+  if (secretEntries.length === 0) return undefined;
 
   const paramsEnv: Record<string, string> = {};
-  for (const { propName, ssmKey } of paramEntries) {
+  for (const { propName, ssmKey } of secretEntries) {
     paramsEnv[`EFF_PARAM_${propName}`] = `/${project}/${stage}/${ssmKey}`;
   }
 
@@ -410,7 +431,9 @@ type DeployTaskCtx = {
   bucketNameMap: Map<string, string>;
   mailerDomainMap: Map<string, string>;
   queueNameMap: Map<string, string>;
-  logComplete: (name: string, type: string, status: StepStatus) => Effect.Effect<void>;
+  logComplete: (name: string, type: string, status: StepStatus, bundleSize?: number) => Effect.Effect<void>;
+  /** SSM path for auth secret (set when any handler uses auth) */
+  authSecretPath?: string;
 };
 
 const makeDeployInput = (ctx: DeployTaskCtx, file: string): DeployInput => ({
@@ -423,12 +446,12 @@ const makeDeployInput = (ctx: DeployTaskCtx, file: string): DeployInput => ({
 
 const resolveHandlerEnv = (
   depsKeys: string[],
-  paramEntries: ParamEntry[],
+  secretEntries: SecretEntry[],
   ctx: DeployTaskCtx,
 ) => {
   const resolved = mergeResolved(
     resolveDeps(depsKeys, ctx.tableNameMap, ctx.bucketNameMap, ctx.mailerDomainMap, ctx.queueNameMap),
-    resolveParams(paramEntries, ctx.input.project, ctx.stage)
+    resolveSecrets(secretEntries, ctx.input.project, ctx.stage)
   );
   return {
     depsEnv: resolved?.depsEnv ?? {},
@@ -447,7 +470,7 @@ const buildTableTasks = (
     for (const fn of exports) {
       tasks.push(
         Effect.gen(function* () {
-          const env = resolveHandlerEnv(fn.depsKeys, fn.paramEntries, ctx);
+          const env = resolveHandlerEnv(fn.depsKeys, fn.secretEntries, ctx);
           const result = yield* deployTableFunction({
             input: makeDeployInput(ctx, file), fn,
             ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
@@ -456,7 +479,7 @@ const buildTableTasks = (
             ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
           }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region }, dynamodb: { region } })));
           results.push(result);
-          yield* ctx.logComplete( fn.exportName, "table", result.status);
+          yield* ctx.logComplete( fn.exportName, "table", result.status, result.bundleSize);
         })
       );
     }
@@ -507,11 +530,19 @@ const buildStaticSiteTasks = (
     for (const fn of exports) {
       tasks.push(
         Effect.gen(function* () {
+          // If this site uses auth, fetch the secret value for middleware injection
+          let authSecretValue: string | undefined;
+          if (fn.authConfig && ctx.authSecretPath) {
+            authSecretValue = yield* fetchAuthSecretValue(ctx.authSecretPath).pipe(
+              Effect.provide(Aws.makeClients({ ssm: { region: ctx.input.region } }))
+            );
+          }
           const result = yield* deployStaticSite({
             projectDir: ctx.input.projectDir, project: ctx.input.project,
             stage: ctx.input.stage, region, fn, verbose: ctx.input.verbose,
             ...(fn.hasHandler ? { file } : {}),
             ...(apiOriginDomain ? { apiOriginDomain } : {}),
+            ...(authSecretValue && fn.authConfig ? { authSecret: authSecretValue, authConfig: fn.authConfig } : {}),
           }).pipe(Effect.provide(Aws.makeClients({
             s3: { region }, cloudfront: { region: "us-east-1" },
             resource_groups_tagging_api: { region: "us-east-1" },
@@ -537,7 +568,7 @@ const buildFifoQueueTasks = (
     for (const fn of exports) {
       tasks.push(
         Effect.gen(function* () {
-          const env = resolveHandlerEnv(fn.depsKeys, fn.paramEntries, ctx);
+          const env = resolveHandlerEnv(fn.depsKeys, fn.secretEntries, ctx);
           const result = yield* deployFifoQueueFunction({
             input: makeDeployInput(ctx, file), fn,
             ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
@@ -546,7 +577,7 @@ const buildFifoQueueTasks = (
             ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
           }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region }, sqs: { region } })));
           results.push(result);
-          yield* ctx.logComplete( fn.exportName, "queue", result.status);
+          yield* ctx.logComplete( fn.exportName, "queue", result.status, result.bundleSize);
         })
       );
     }
@@ -565,7 +596,7 @@ const buildBucketTasks = (
     for (const fn of exports) {
       tasks.push(
         Effect.gen(function* () {
-          const env = resolveHandlerEnv(fn.depsKeys, fn.paramEntries, ctx);
+          const env = resolveHandlerEnv(fn.depsKeys, fn.secretEntries, ctx);
           const result = yield* deployBucketFunction({
             input: makeDeployInput(ctx, file), fn,
             ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
@@ -575,7 +606,7 @@ const buildBucketTasks = (
           }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region }, s3: { region } })));
           results.push(result);
           const status = result.status === "resource-only" ? "created" : result.status;
-          yield* ctx.logComplete(fn.exportName, "bucket", status);
+          yield* ctx.logComplete(fn.exportName, "bucket", status, result.bundleSize);
         })
       );
     }
@@ -620,8 +651,13 @@ const buildApiTasks = (
     for (const fn of exports) {
       tasks.push(
         Effect.gen(function* () {
-          const env = resolveHandlerEnv(fn.depsKeys, fn.paramEntries, ctx);
-          const { exportName, functionArn, status, handlerName } = yield* deployApiFunction({
+          const env = resolveHandlerEnv(fn.depsKeys, fn.secretEntries, ctx);
+          // Add auth secret env var if this API handler uses auth
+          if (fn.authConfig && ctx.authSecretPath) {
+            env.depsEnv["EFF_AUTH_SECRET"] = ctx.authSecretPath;
+            env.depsPermissions = [...env.depsPermissions, "ssm:GetParameter", "ssm:GetParameters"];
+          }
+          const { exportName, functionArn, status, bundleSize, handlerName } = yield* deployApiFunction({
             input: makeDeployInput(ctx, file), fn,
             ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
             ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
@@ -639,7 +675,7 @@ const buildApiTasks = (
           );
 
           results.push({ exportName, url: functionUrl, functionArn });
-          yield* ctx.logComplete(exportName, "api", status);
+          yield* ctx.logComplete(exportName, "api", status, bundleSize);
         })
       );
     }
@@ -659,6 +695,7 @@ export type DeployProjectInput = {
   region: string;
   noSites?: boolean;
   verbose?: boolean;
+  extraNodeModules?: string[];
 };
 
 export type DeployProjectResult = {
@@ -711,14 +748,34 @@ export const deployProject = (input: DeployProjectInput) =>
 
     // Check for missing SSM parameters
     const discovered = { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers };
-    const requiredParams = collectRequiredParams(discovered, input.project, stage);
-    if (requiredParams.length > 0) {
-      const { missing } = yield* checkMissingParams(requiredParams).pipe(
+    const requiredSecrets = collectRequiredSecrets(discovered, input.project, stage);
+    const authSecret = collectAuthSecret(discovered, input.project, stage);
+    if (authSecret) requiredSecrets.push(authSecret);
+    if (requiredSecrets.length > 0) {
+      const { missing } = yield* checkMissingSecrets(requiredSecrets).pipe(
         Effect.provide(Aws.makeClients({ ssm: { region: input.region } }))
       );
-      if (missing.length > 0) {
-        yield* Console.log(`\n  ${c.yellow("⚠")} Missing ${missing.length} SSM parameter(s):\n`);
-        for (const p of missing) {
+
+      // Auto-create secrets that have generators
+      const withGenerators = missing.filter(m => m.generate);
+      const manualOnly = missing.filter(m => !m.generate);
+
+      if (withGenerators.length > 0) {
+        for (const entry of withGenerators) {
+          const value = executeGenerateSpec(entry.generate!);
+          yield* ssm.make("put_parameter", {
+            Name: entry.ssmPath,
+            Value: value,
+            Type: "SecureString",
+          }).pipe(Effect.provide(Aws.makeClients({ ssm: { region: input.region } })));
+          yield* Effect.logDebug(`Auto-created SSM parameter: ${entry.ssmPath}`);
+        }
+        yield* Console.log(`\n  ${c.green("✓")} Auto-created ${withGenerators.length} secret(s)`);
+      }
+
+      if (manualOnly.length > 0) {
+        yield* Console.log(`\n  ${c.yellow("⚠")} Missing ${manualOnly.length} SSM parameter(s):\n`);
+        for (const p of manualOnly) {
           yield* Console.log(`    ${c.dim(p.handlerName)} → ${c.yellow(p.ssmPath)}`);
         }
         yield* Console.log(`\n  Run: ${c.cyan(`npx eff config --stage ${stage}`)}`);
@@ -748,7 +805,8 @@ export const deployProject = (input: DeployProjectInput) =>
           project: input.project,
           stage: stage,
           region: input.region,
-          packageDir: input.packageDir ?? input.projectDir
+          packageDir: input.packageDir ?? input.projectDir,
+          extraNodeModules: input.extraNodeModules
         })
       : { layerArn: undefined, layerVersion: undefined, layerStatus: undefined, external: [] as string[] };
 
@@ -782,6 +840,7 @@ export const deployProject = (input: DeployProjectInput) =>
     const logComplete = createLiveProgress(manifest);
     const ctx: DeployTaskCtx = {
       input, layerArn, external, stage, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, logComplete,
+      ...(authSecret ? { authSecretPath: authSecret.ssmPath } : {}),
     };
 
     const tableResults: DeployTableResult[] = [];

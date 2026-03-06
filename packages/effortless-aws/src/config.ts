@@ -84,6 +84,7 @@ export type EffortlessConfig = {
      */
     runtime?: string;
   };
+
 };
 
 /**

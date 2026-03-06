@@ -1,13 +1,60 @@
-import { Project, SyntaxKind, type ObjectLiteralExpression, type PropertyAssignment, type CallExpression, type ArrayLiteralExpression, type ArrowFunction, type ParenthesizedExpression } from "ts-morph";
+import { Project, SyntaxKind, type ObjectLiteralExpression, type PropertyAssignment, type CallExpression, type ArrowFunction, type ParenthesizedExpression, type Node } from "ts-morph";
 
-// ============ Shared utilities ============
+// ============ Shared AST helpers ============
 
 const parseSource = (source: string) => {
   const project = new Project({ useInMemoryFileSystem: true });
   return project.createSourceFile("input.ts", source);
 };
 
-const RUNTIME_PROPS = ["onRecord", "onBatchComplete", "onBatch", "onMessage", "onObjectCreated", "onObjectRemoved", "setup", "schema", "onError", "deps", "config", "static", "middleware", "routes", "get", "post"];
+/** Get the bare function name (handles `Eff.defineTable` → `defineTable`) */
+const bareName = (expr: string): string => {
+  const dot = expr.lastIndexOf(".");
+  return dot === -1 ? expr : expr.slice(dot + 1);
+};
+
+/** Get initializer of a named property from an object literal */
+const getProp = (obj: ObjectLiteralExpression, name: string): Node | undefined =>
+  obj.getProperties()
+    .find(p => p.getKind() === SyntaxKind.PropertyAssignment && (p as PropertyAssignment).getName() === name)
+    ?.asKindOrThrow(SyntaxKind.PropertyAssignment)
+    .getInitializer();
+
+/** Find all exported `defineFn(...)` calls, returning { exportName, args } */
+const findDefineCalls = (sourceFile: ReturnType<typeof parseSource>, defineFn: string) => {
+  const results: { exportName: string; args: ObjectLiteralExpression }[] = [];
+
+  const tryAdd = (callExpr: CallExpression, exportName: string) => {
+    if (bareName(callExpr.getExpression().getText()) !== defineFn) return;
+    const firstArg = callExpr.getArguments()[0];
+    if (firstArg?.getKind() === SyntaxKind.ObjectLiteralExpression) {
+      results.push({ exportName, args: firstArg as ObjectLiteralExpression });
+    }
+  };
+
+  // default export
+  const def = sourceFile.getExportAssignment(e => !e.isExportEquals());
+  if (def?.getExpression().getKind() === SyntaxKind.CallExpression) {
+    tryAdd(def.getExpression().asKindOrThrow(SyntaxKind.CallExpression), "default");
+  }
+
+  // named exports
+  for (const stmt of sourceFile.getVariableStatements()) {
+    if (!stmt.isExported()) continue;
+    for (const decl of stmt.getDeclarations()) {
+      const init = decl.getInitializer();
+      if (init?.getKind() === SyntaxKind.CallExpression) {
+        tryAdd(init.asKindOrThrow(SyntaxKind.CallExpression), decl.getName());
+      }
+    }
+  }
+
+  return results;
+};
+
+// ============ Config evaluation ============
+
+const RUNTIME_PROPS = ["onRecord", "onBatchComplete", "onBatch", "onMessage", "onObjectCreated", "onObjectRemoved", "setup", "schema", "onError", "deps", "config", "static", "middleware", "auth", "routes", "get", "post"];
 
 const evalConfig = <T>(configText: string, exportName: string): T => {
   try {
@@ -25,8 +72,10 @@ const buildConfigWithoutRuntime = (obj: ObjectLiteralExpression): string => {
   const props = obj.getProperties()
     .filter(p => {
       if (p.getKind() === SyntaxKind.PropertyAssignment) {
-        const propAssign = p as PropertyAssignment;
-        return !RUNTIME_PROPS.includes(propAssign.getName());
+        return !RUNTIME_PROPS.includes((p as PropertyAssignment).getName());
+      }
+      if (p.getKind() === SyntaxKind.ShorthandPropertyAssignment) {
+        return !RUNTIME_PROPS.includes(p.asKindOrThrow(SyntaxKind.ShorthandPropertyAssignment).getName());
       }
       return true;
     })
@@ -35,37 +84,14 @@ const buildConfigWithoutRuntime = (obj: ObjectLiteralExpression): string => {
   return `{ ${props} }`;
 };
 
-const extractPropertyFromObject = (obj: ObjectLiteralExpression, propName: string): string | undefined => {
-  const prop = obj.getProperties().find(p => {
-    if (p.getKind() === SyntaxKind.PropertyAssignment) {
-      return (p as PropertyAssignment).getName() === propName;
-    }
-    return false;
-  });
+// ============ Property extractors ============
 
-  if (prop && prop.getKind() === SyntaxKind.PropertyAssignment) {
-    const propAssign = prop as PropertyAssignment;
-    return propAssign.getInitializer()?.getText();
-  }
-  return undefined;
-};
+/** Convert camelCase property name to kebab-case SSM key. */
+const toKebabCase = (str: string): string =>
+  str.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 
-/**
- * Extract dependency key names from the deps property of a handler config.
- * Handles: deps: { orders, users } (object literal)
- * And:     deps: () => ({ orders, users }) (arrow function returning object)
- */
 const extractDepsKeys = (obj: ObjectLiteralExpression): string[] => {
-  const depsProp = obj.getProperties().find(p => {
-    if (p.getKind() === SyntaxKind.PropertyAssignment) {
-      return (p as PropertyAssignment).getName() === "deps";
-    }
-    return false;
-  });
-
-  if (!depsProp || depsProp.getKind() !== SyntaxKind.PropertyAssignment) return [];
-
-  let init = (depsProp as PropertyAssignment).getInitializer();
+  let init = getProp(obj, "deps");
   if (!init) return [];
 
   // Unwrap arrow function: deps: () => ({ ... })
@@ -76,10 +102,9 @@ const extractDepsKeys = (obj: ObjectLiteralExpression): string[] => {
     }
   }
 
-  if (!init || init.getKind() !== SyntaxKind.ObjectLiteralExpression) return [];
+  if (init.getKind() !== SyntaxKind.ObjectLiteralExpression) return [];
 
-  const depsObj = init as ObjectLiteralExpression;
-  return depsObj.getProperties()
+  return (init as ObjectLiteralExpression).getProperties()
     .map(p => {
       if (p.getKind() === SyntaxKind.ShorthandPropertyAssignment) {
         return p.asKindOrThrow(SyntaxKind.ShorthandPropertyAssignment).getName();
@@ -92,28 +117,34 @@ const extractDepsKeys = (obj: ObjectLiteralExpression): string[] => {
     .filter(Boolean);
 };
 
-/**
- * Extract param entries from the config property of a handler definition.
- * Reads: config: { dbUrl: "database-url", appConfig: param("app-config", TOML.parse) }
- * Returns: [{ propName: "dbUrl", ssmKey: "database-url" }, { propName: "appConfig", ssmKey: "app-config" }]
- */
-export type ParamEntry = { propName: string; ssmKey: string };
+// ============ Secrets / Params extraction ============
 
-const extractParamEntries = (obj: ObjectLiteralExpression): ParamEntry[] => {
-  const configProp = obj.getProperties().find(p => {
-    if (p.getKind() === SyntaxKind.PropertyAssignment) {
-      return (p as PropertyAssignment).getName() === "config";
-    }
-    return false;
-  });
+export type GenerateSpec =
+  | { type: "hex"; bytes: number }
+  | { type: "base64"; bytes: number }
+  | { type: "uuid" };
 
-  if (!configProp || configProp.getKind() !== SyntaxKind.PropertyAssignment) return [];
+export type SecretEntry = { propName: string; ssmKey: string; generate?: GenerateSpec };
 
-  const init = (configProp as PropertyAssignment).getInitializer();
+/** @deprecated Use SecretEntry */
+export type ParamEntry = SecretEntry;
+
+const parseGenerateSpec = (text: string | undefined): GenerateSpec | undefined => {
+  if (!text) return undefined;
+  const hexMatch = text.match(/generateHex\((\d+)\)/);
+  if (hexMatch) return { type: "hex", bytes: Number(hexMatch[1]) };
+  const base64Match = text.match(/generateBase64\((\d+)\)/);
+  if (base64Match) return { type: "base64", bytes: Number(base64Match[1]) };
+  if (text.includes("generateUuid")) return { type: "uuid" };
+  return undefined;
+};
+
+const extractSecretEntries = (obj: ObjectLiteralExpression): SecretEntry[] => {
+  const init = getProp(obj, "config");
   if (!init || init.getKind() !== SyntaxKind.ObjectLiteralExpression) return [];
 
   const configObj = init as ObjectLiteralExpression;
-  const entries: ParamEntry[] = [];
+  const entries: SecretEntry[] = [];
 
   for (const p of configObj.getProperties()) {
     if (p.getKind() !== SyntaxKind.PropertyAssignment) continue;
@@ -121,88 +152,110 @@ const extractParamEntries = (obj: ObjectLiteralExpression): ParamEntry[] => {
     const propAssign = p as PropertyAssignment;
     const propName = propAssign.getName();
     const propInit = propAssign.getInitializer();
-
     if (!propInit) continue;
 
-    // Plain string: config: { dbUrl: "database-url" }
+    // Legacy plain string: config: { dbUrl: "database-url" }
     if (propInit.getKind() === SyntaxKind.StringLiteral) {
-      const ssmKey = propInit.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralValue();
-      entries.push({ propName, ssmKey });
+      entries.push({ propName, ssmKey: propInit.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralValue() });
       continue;
     }
 
-    // param() call: config: { dbUrl: param("database-url") } or param("key", transform)
     if (propInit.getKind() !== SyntaxKind.CallExpression) continue;
-
     const callExpr = propInit as CallExpression;
-    const callArgs = callExpr.getArguments();
-    if (callArgs.length === 0) continue;
+    const fnName = bareName(callExpr.getExpression().getText());
 
-    const firstArg = callArgs[0]!;
-    if (firstArg.getKind() === SyntaxKind.StringLiteral) {
-      const ssmKey = firstArg.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralValue();
-      entries.push({ propName, ssmKey });
+    if (fnName === "secret") {
+      const callArgs = callExpr.getArguments();
+      if (callArgs.length === 0) {
+        entries.push({ propName, ssmKey: toKebabCase(propName) });
+        continue;
+      }
+
+      const firstArg = callArgs[0]!;
+      if (firstArg.getKind() === SyntaxKind.ObjectLiteralExpression) {
+        const optObj = firstArg as ObjectLiteralExpression;
+        const keyText = getProp(optObj, "key")?.getText();
+        const ssmKey = keyText ? keyText.replace(/^["']|["']$/g, "") : toKebabCase(propName);
+        const generate = parseGenerateSpec(getProp(optObj, "generate")?.getText());
+        entries.push({ propName, ssmKey, ...(generate ? { generate } : {}) });
+      }
+      continue;
+    }
+
+    // Legacy param("key") or param("key", transform)
+    if (fnName === "param") {
+      const firstArg = callExpr.getArguments()[0];
+      if (firstArg?.getKind() === SyntaxKind.StringLiteral) {
+        entries.push({ propName, ssmKey: firstArg.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralValue() });
+      }
     }
   }
 
   return entries;
 };
 
-/**
- * Extract static file glob patterns from the static property of a handler config.
- * Reads: static: ["src/templates/*.ejs", "src/assets/*.css"]
- * Returns: ["src/templates/*.ejs", "src/assets/*.css"]
- */
 const extractStaticGlobs = (obj: ObjectLiteralExpression): string[] => {
-  const staticProp = obj.getProperties().find(p => {
-    if (p.getKind() === SyntaxKind.PropertyAssignment) {
-      return (p as PropertyAssignment).getName() === "static";
-    }
-    return false;
-  });
-
-  if (!staticProp || staticProp.getKind() !== SyntaxKind.PropertyAssignment) return [];
-
-  const init = (staticProp as PropertyAssignment).getInitializer();
+  const init = getProp(obj, "static");
   if (!init || init.getKind() !== SyntaxKind.ArrayLiteralExpression) return [];
 
-  const arrayLiteral = init as ArrayLiteralExpression;
-  return arrayLiteral.getElements()
+  return init.asKindOrThrow(SyntaxKind.ArrayLiteralExpression).getElements()
     .filter(e => e.getKind() === SyntaxKind.StringLiteral)
     .map(e => e.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralValue());
 };
 
-/**
- * Extract route path patterns from the routes property of a static site config.
- * Reads: routes: { "/api/*": api, "/auth/*": auth }
- * Returns: ["/api/*", "/auth/*"]
- */
 const extractRoutePatterns = (obj: ObjectLiteralExpression): string[] => {
-  const routesProp = obj.getProperties().find(p => {
-    if (p.getKind() === SyntaxKind.PropertyAssignment) {
-      return (p as PropertyAssignment).getName() === "routes";
-    }
-    return false;
-  });
-
-  if (!routesProp || routesProp.getKind() !== SyntaxKind.PropertyAssignment) return [];
-
-  const init = (routesProp as PropertyAssignment).getInitializer();
+  const init = getProp(obj, "routes");
   if (!init || init.getKind() !== SyntaxKind.ObjectLiteralExpression) return [];
 
-  const routesObj = init as ObjectLiteralExpression;
-  return routesObj.getProperties()
+  return (init as ObjectLiteralExpression).getProperties()
     .map(p => {
       if (p.getKind() !== SyntaxKind.PropertyAssignment) return "";
       const nameNode = (p as PropertyAssignment).getNameNode();
-      // String literal keys like "/api/*"
       if (nameNode.getKind() === SyntaxKind.StringLiteral) {
         return nameNode.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralValue();
       }
-      // Identifier keys (unlikely for path patterns but handle gracefully)
       return nameNode.getText();
     })
     .filter(Boolean);
+};
+
+// ============ Auth config extraction ============
+
+export type AuthConfig = {
+  loginPath: string;
+  public?: string[];
+  expiresIn?: string | number;
+};
+
+const extractAuthConfigFromCall = (callExpr: CallExpression): AuthConfig | undefined => {
+  if (bareName(callExpr.getExpression().getText()) !== "defineAuth") return undefined;
+  const firstArg = callExpr.getArguments()[0];
+  if (!firstArg || firstArg.getKind() !== SyntaxKind.ObjectLiteralExpression) return undefined;
+  try {
+    return new Function(`return ${firstArg.getText()}`)() as AuthConfig;
+  } catch {
+    return undefined;
+  }
+};
+
+const extractAuthConfig = (obj: ObjectLiteralExpression, sourceFile: ReturnType<typeof parseSource>): AuthConfig | undefined => {
+  const init = getProp(obj, "auth");
+  if (!init) return undefined;
+
+  // Direct call: auth: defineAuth({ ... })
+  if (init.getKind() === SyntaxKind.CallExpression) {
+    return extractAuthConfigFromCall(init as CallExpression);
+  }
+
+  // Identifier reference: auth: protect
+  if (init.getKind() === SyntaxKind.Identifier) {
+    const varInit = sourceFile.getVariableDeclaration(init.getText())?.getInitializer();
+    if (varInit?.getKind() === SyntaxKind.CallExpression) {
+      return extractAuthConfigFromCall(varInit as CallExpression);
+    }
+  }
+
+  return undefined;
 };
 
 // ============ Handler Registry ============
@@ -267,67 +320,31 @@ export type ExtractedConfig<T = unknown> = {
   config: T;
   hasHandler: boolean;
   depsKeys: string[];
-  paramEntries: ParamEntry[];
+  secretEntries: SecretEntry[];
   staticGlobs: string[];
   routePatterns: string[];
+  authConfig?: AuthConfig;
 };
 
 export const extractHandlerConfigs = <T>(source: string, type: HandlerType): ExtractedConfig<T>[] => {
   const { defineFn, handlerProps } = handlerRegistry[type];
   const sourceFile = parseSource(source);
-  const results: ExtractedConfig<T>[] = [];
 
-  const exportDefault = sourceFile.getExportAssignment(e => !e.isExportEquals());
-  if (exportDefault) {
-    const expr = exportDefault.getExpression();
-    if (expr.getKind() === SyntaxKind.CallExpression) {
-      const callExpr = expr.asKindOrThrow(SyntaxKind.CallExpression);
-      if (callExpr.getExpression().getText() === defineFn) {
-        const args = callExpr.getArguments();
-        const firstArg = args[0];
-        if (firstArg && firstArg.getKind() === SyntaxKind.ObjectLiteralExpression) {
-          const objLiteral = firstArg as ObjectLiteralExpression;
-          const configText = buildConfigWithoutRuntime(objLiteral);
-          const config = evalConfig<T>(configText, "default");
-          const hasHandler = handlerProps.some(p => extractPropertyFromObject(objLiteral, p) !== undefined);
-          const depsKeys = extractDepsKeys(objLiteral);
-          const paramEntries = extractParamEntries(objLiteral);
-          const staticGlobs = extractStaticGlobs(objLiteral);
-          const routePatterns = extractRoutePatterns(objLiteral);
-          results.push({ exportName: "default", config, hasHandler, depsKeys, paramEntries, staticGlobs, routePatterns });
-        }
-      }
-    }
-  }
-
-  sourceFile.getVariableStatements().forEach(stmt => {
-    if (!stmt.isExported()) return;
-
-    stmt.getDeclarations().forEach(decl => {
-      const initializer = decl.getInitializer();
-      if (!initializer || initializer.getKind() !== SyntaxKind.CallExpression) return;
-
-      const callExpr = initializer.asKindOrThrow(SyntaxKind.CallExpression);
-      if (callExpr.getExpression().getText() !== defineFn) return;
-
-      const args = callExpr.getArguments();
-      const firstArg = args[0];
-      if (firstArg && firstArg.getKind() === SyntaxKind.ObjectLiteralExpression) {
-        const objLiteral = firstArg as ObjectLiteralExpression;
-        const configText = buildConfigWithoutRuntime(objLiteral);
-        const exportName = decl.getName();
-        const config = evalConfig<T>(configText, exportName);
-        const hasHandler = handlerProps.some(p => extractPropertyFromObject(objLiteral, p) !== undefined);
-        const depsKeys = extractDepsKeys(objLiteral);
-        const paramEntries = extractParamEntries(objLiteral);
-        const staticGlobs = extractStaticGlobs(objLiteral);
-        const routePatterns = extractRoutePatterns(objLiteral);
-        results.push({ exportName, config, hasHandler, depsKeys, paramEntries, staticGlobs, routePatterns });
-      }
-    });
+  return findDefineCalls(sourceFile, defineFn).map(({ exportName, args }) => {
+    const config = evalConfig<T>(buildConfigWithoutRuntime(args), exportName);
+    const hasHandler = handlerProps.some(p => getProp(args, p) !== undefined);
+    const authCfg = extractAuthConfig(args, sourceFile);
+    return {
+      exportName,
+      config,
+      hasHandler,
+      depsKeys: extractDepsKeys(args),
+      secretEntries: extractSecretEntries(args),
+      staticGlobs: extractStaticGlobs(args),
+      routePatterns: extractRoutePatterns(args),
+      ...(authCfg ? { authConfig: authCfg } : {}),
+    };
   });
-
-  return results;
 };
 
 // ============ Entry point generation ============
@@ -342,57 +359,39 @@ export const generateMiddlewareEntryPoint = (
   runtimeDir: string
 ): { entryPoint: string; exportName: string } => {
   const sourceFile = parseSource(source);
+  const calls = findDefineCalls(sourceFile, handlerRegistry.staticSite.defineFn);
 
-  // Collect all import declarations (preserving original paths)
-  const imports = sourceFile.getImportDeclarations()
-    .map(d => d.getText())
-    .join("\n");
-
-  // Find the staticSite export and extract the middleware function text
-  const defineFn = handlerRegistry.staticSite.defineFn;
   let middlewareFnText: string | undefined;
   let exportName: string | undefined;
 
-  // Check default export
-  const exportDefault = sourceFile.getExportAssignment(e => !e.isExportEquals());
-  if (exportDefault) {
-    const expr = exportDefault.getExpression();
-    if (expr.getKind() === SyntaxKind.CallExpression) {
-      const callExpr = expr.asKindOrThrow(SyntaxKind.CallExpression);
-      if (callExpr.getExpression().getText() === defineFn) {
-        const args = callExpr.getArguments();
-        const firstArg = args[0];
-        if (firstArg?.getKind() === SyntaxKind.ObjectLiteralExpression) {
-          middlewareFnText = extractPropertyFromObject(firstArg as ObjectLiteralExpression, "middleware");
-          exportName = "default";
-        }
-      }
+  for (const call of calls) {
+    const mw = getProp(call.args, "middleware")?.getText();
+    if (mw) {
+      middlewareFnText = mw;
+      exportName = call.exportName;
+      break;
     }
-  }
-
-  // Check named exports
-  if (!middlewareFnText) {
-    sourceFile.getVariableStatements().forEach(stmt => {
-      if (middlewareFnText || !stmt.isExported()) return;
-      stmt.getDeclarations().forEach(decl => {
-        if (middlewareFnText) return;
-        const init = decl.getInitializer();
-        if (!init || init.getKind() !== SyntaxKind.CallExpression) return;
-        const callExpr = init.asKindOrThrow(SyntaxKind.CallExpression);
-        if (callExpr.getExpression().getText() !== defineFn) return;
-        const args = callExpr.getArguments();
-        const firstArg = args[0];
-        if (firstArg?.getKind() === SyntaxKind.ObjectLiteralExpression) {
-          middlewareFnText = extractPropertyFromObject(firstArg as ObjectLiteralExpression, "middleware");
-          exportName = decl.getName();
-        }
-      });
-    });
   }
 
   if (!middlewareFnText || !exportName) {
     throw new Error("Could not extract middleware function from source");
   }
+
+  // Only include imports whose bindings are actually referenced in the middleware fn
+  const imports = sourceFile.getImportDeclarations()
+    .filter(d => {
+      const defaultImport = d.getDefaultImport()?.getText();
+      if (defaultImport && middlewareFnText!.includes(defaultImport)) return true;
+      for (const spec of d.getNamedImports()) {
+        const alias = spec.getAliasNode()?.getText() ?? spec.getName();
+        if (middlewareFnText!.includes(alias)) return true;
+      }
+      const ns = d.getNamespaceImport()?.getText();
+      if (ns && middlewareFnText!.includes(ns)) return true;
+      return false;
+    })
+    .map(d => d.getText())
+    .join("\n");
 
   const wrapperPath = runtimeDir
     ? handlerRegistry.staticSite.wrapperPath.replace("~/runtime", runtimeDir)

@@ -258,7 +258,8 @@ describe("generateMiddlewareEntryPoint", () => {
     expect(entryPoint).toContain("wrapMiddlewareFn");
     expect(entryPoint).toContain("Auth.COOKIE");
     expect(entryPoint).toContain("Auth.TOKEN");
-    // Should NOT contain the full handler config (dir, etc.)
+    // Should NOT contain unused imports or handler config
+    expect(entryPoint).not.toContain("defineStaticSite");
     expect(entryPoint).not.toContain('dir: "dist"');
   });
 
@@ -279,11 +280,12 @@ describe("generateMiddlewareEntryPoint", () => {
     expect(entryPoint).toContain('req.uri === "/health"');
   });
 
-  it("should include all imports from the source file", () => {
+  it("should only include imports referenced by middleware", () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
       import { Auth } from "../core/auth";
       import { Config } from "../config";
+      import { HttpClient } from "../core/services";
       export const site = defineStaticSite({
         dir: "dist",
         middleware: (req) => {
@@ -295,6 +297,9 @@ describe("generateMiddlewareEntryPoint", () => {
     const { entryPoint } = generateMiddlewareEntryPoint(source, "/fake/runtime");
     expect(entryPoint).toContain('import { Auth } from "../core/auth"');
     expect(entryPoint).toContain('import { Config } from "../config"');
+    // Unused imports should be excluded
+    expect(entryPoint).not.toContain("defineStaticSite");
+    expect(entryPoint).not.toContain("HttpClient");
   });
 
   it("should throw when no middleware found", () => {

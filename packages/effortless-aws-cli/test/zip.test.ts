@@ -21,8 +21,8 @@ describe("zip", () => {
       });
     `;
 
-    const bundled = await Effect.runPromise(bundleCode({ code: handlerCode, projectDir }));
-    const zipBuffer = await Effect.runPromise(zip({ content: bundled }));
+    const result = await Effect.runPromise(bundleCode({ code: handlerCode, projectDir }));
+    const zipBuffer = await Effect.runPromise(zip({ content: result.code }));
 
     // ZIP file starts with PK signature (0x504B)
     expect(zipBuffer[0]).toBe(0x50); // P

@@ -60,7 +60,7 @@ describe("defineStaticSite extraction", () => {
     const configs = extractStaticSiteConfigs(source);
 
     expect(configs[0]!.depsKeys).toEqual([]);
-    expect(configs[0]!.paramEntries).toEqual([]);
+    expect(configs[0]!.secretEntries).toEqual([]);
     expect(configs[0]!.staticGlobs).toEqual([]);
     expect(configs[0]!.routePatterns).toEqual([]);
   });
@@ -242,6 +242,73 @@ describe("defineStaticSite extraction", () => {
 
     const configs = extractStaticSiteConfigs(source);
     expect(configs).toHaveLength(0);
+  });
+
+  // ============ Auth config extraction ============
+
+  it("should extract auth config from inline defineAuth() call", () => {
+    const source = `
+      import { defineStaticSite, defineAuth } from "effortless-aws";
+
+      export const webapp = defineStaticSite({
+        dir: "dist",
+        spa: true,
+        auth: defineAuth({
+          loginPath: "/login",
+          public: ["/login", "/assets/*", "/favicon.ico"],
+          expiresIn: "7d",
+        }),
+      });
+    `;
+
+    const configs = extractStaticSiteConfigs(source);
+
+    expect(configs).toHaveLength(1);
+    expect(configs[0]!.authConfig).toEqual({
+      loginPath: "/login",
+      public: ["/login", "/assets/*", "/favicon.ico"],
+      expiresIn: "7d",
+    });
+    // auth should be stripped from serialized config
+    expect(configs[0]!.config).not.toHaveProperty("auth");
+  });
+
+  it("should extract auth config from variable reference", () => {
+    const source = `
+      import { defineStaticSite, defineAuth } from "effortless-aws";
+
+      const protect = defineAuth({
+        loginPath: "/login",
+        public: ["/login"],
+      });
+
+      export const webapp = defineStaticSite({
+        dir: "dist",
+        auth: protect,
+      });
+    `;
+
+    const configs = extractStaticSiteConfigs(source);
+
+    expect(configs).toHaveLength(1);
+    expect(configs[0]!.authConfig).toEqual({
+      loginPath: "/login",
+      public: ["/login"],
+    });
+  });
+
+  it("should not have authConfig when no auth is specified", () => {
+    const source = `
+      import { defineStaticSite } from "effortless-aws";
+
+      export const docs = defineStaticSite({
+        dir: "dist",
+      });
+    `;
+
+    const configs = extractStaticSiteConfigs(source);
+
+    expect(configs[0]!.authConfig).toBeUndefined();
   });
 
 });

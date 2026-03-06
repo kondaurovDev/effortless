@@ -27,8 +27,9 @@ export const buildCommand = Command.make(
   { file: buildFileArg, all: buildAllOption, table: buildTableOption, output: outputOption, verbose: verboseOption },
   ({ file, all, table, output, verbose }) =>
     Effect.gen(function* () {
-      const { config, projectDir } = yield* ProjectConfig;
+      const { config, projectDir, cwd } = yield* ProjectConfig;
       const outputDir = path.isAbsolute(output) ? output : path.resolve(projectDir, output);
+      const extraNodeModules = projectDir !== cwd ? [path.join(projectDir, "node_modules")] : undefined;
 
       if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir, { recursive: true });
@@ -38,7 +39,7 @@ export const buildCommand = Command.make(
         Effect.catchAll(() => Effect.succeed([] as string[]))
       );
       const { packages: external, warnings: layerWarnings } = prodDeps.length > 0
-        ? yield* Effect.sync(() => collectLayerPackages(projectDir, prodDeps))
+        ? yield* Effect.sync(() => collectLayerPackages(projectDir, prodDeps, extraNodeModules))
         : { packages: [] as string[], warnings: [] as string[] };
 
       for (const warning of layerWarnings) {
@@ -73,7 +74,7 @@ export const buildCommand = Command.make(
 
                 yield* Console.log(`Building ${c.cyan("[api]")} ${c.bold(relativePath)}:${exportName}...`);
 
-                const bundled = yield* bundle({
+                const result = yield* bundle({
                   projectDir,
                   file: handlerFile,
                   exportName,
@@ -81,9 +82,14 @@ export const buildCommand = Command.make(
                   ...(external.length > 0 ? { external } : {})
                 });
 
-                fs.writeFileSync(outputPath, bundled);
-                const size = (Buffer.byteLength(bundled) / 1024).toFixed(1);
+                fs.writeFileSync(outputPath, result.code);
+                const size = (Buffer.byteLength(result.code) / 1024).toFixed(1);
                 yield* Console.log(`  -> ${outputPath} ${c.dim(`(${size} KB)`)}`);
+                if (result.topModules) {
+                  for (const m of result.topModules.slice(0, 5)) {
+                    yield* Console.log(`     ${c.dim(`${(m.bytes / 1024).toFixed(1)} KB`)}  ${c.dim(m.path)}`);
+                  }
+                }
                 builtCount++;
               }
             }
@@ -98,7 +104,7 @@ export const buildCommand = Command.make(
 
                 yield* Console.log(`Building ${c.cyan("[table]")} ${c.bold(relativePath)}:${exportName}...`);
 
-                const bundled = yield* bundle({
+                const result = yield* bundle({
                   projectDir,
                   file: handlerFile,
                   exportName,
@@ -106,9 +112,14 @@ export const buildCommand = Command.make(
                   ...(external.length > 0 ? { external } : {})
                 });
 
-                fs.writeFileSync(outputPath, bundled);
-                const size = (Buffer.byteLength(bundled) / 1024).toFixed(1);
+                fs.writeFileSync(outputPath, result.code);
+                const size = (Buffer.byteLength(result.code) / 1024).toFixed(1);
                 yield* Console.log(`  -> ${outputPath} ${c.dim(`(${size} KB)`)}`);
+                if (result.topModules) {
+                  for (const m of result.topModules.slice(0, 5)) {
+                    yield* Console.log(`     ${c.dim(`${(m.bytes / 1024).toFixed(1)} KB`)}  ${c.dim(m.path)}`);
+                  }
+                }
                 builtCount++;
               }
             }
@@ -136,7 +147,7 @@ export const buildCommand = Command.make(
 
                 yield* Console.log(`Building ${c.cyan("[table]")} ${c.bold(exportName)}...`);
 
-                const bundled = yield* bundle({
+                const result = yield* bundle({
                   projectDir,
                   file: fullPath,
                   exportName,
@@ -144,9 +155,14 @@ export const buildCommand = Command.make(
                   ...(external.length > 0 ? { external } : {})
                 });
 
-                fs.writeFileSync(outputPath, bundled);
-                const size = (Buffer.byteLength(bundled) / 1024).toFixed(1);
+                fs.writeFileSync(outputPath, result.code);
+                const size = (Buffer.byteLength(result.code) / 1024).toFixed(1);
                 yield* Console.log(`  -> ${outputPath} ${c.dim(`(${size} KB)`)}`);
+                if (result.topModules) {
+                  for (const m of result.topModules.slice(0, 5)) {
+                    yield* Console.log(`     ${c.dim(`${(m.bytes / 1024).toFixed(1)} KB`)}  ${c.dim(m.path)}`);
+                  }
+                }
               }
             } else {
               const configs = extractApiConfigs(source);
@@ -163,16 +179,21 @@ export const buildCommand = Command.make(
 
                 yield* Console.log(`Building ${c.cyan("[api]")} ${c.bold(exportName)}...`);
 
-                const bundled = yield* bundle({
+                const result = yield* bundle({
                   projectDir,
                   file: fullPath,
                   exportName,
                   ...(external.length > 0 ? { external } : {})
                 });
 
-                fs.writeFileSync(outputPath, bundled);
-                const size = (Buffer.byteLength(bundled) / 1024).toFixed(1);
+                fs.writeFileSync(outputPath, result.code);
+                const size = (Buffer.byteLength(result.code) / 1024).toFixed(1);
                 yield* Console.log(`  -> ${outputPath} ${c.dim(`(${size} KB)`)}`);
+                if (result.topModules) {
+                  for (const m of result.topModules.slice(0, 5)) {
+                    yield* Console.log(`     ${c.dim(`${(m.bytes / 1024).toFixed(1)} KB`)}  ${c.dim(m.path)}`);
+                  }
+                }
               }
             }
 

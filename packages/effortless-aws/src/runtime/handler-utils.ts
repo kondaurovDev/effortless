@@ -1,6 +1,9 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import type { LogLevel } from "../handlers/handler-options";
+import { toSeconds } from "../handlers/handler-options";
+import type { CookieAuth, AuthRuntime } from "../handlers/auth";
+import { createAuthRuntime } from "../handlers/auth";
 import { createTableClient } from "./table-client";
 import { createBucketClient } from "./bucket-client";
 import { createEmailClient } from "./email-client";
@@ -11,6 +14,8 @@ export type { LogLevel };
 
 export const ENV_DEP_PREFIX = "EFF_DEP_";
 export const ENV_PARAM_PREFIX = "EFF_PARAM_";
+export const ENV_AUTH_SECRET = "EFF_AUTH_SECRET";
+export const ENV_AUTH_EXPIRES = "EFF_AUTH_EXPIRES";
 
 const LOG_RANK: Record<LogLevel, number> = { error: 0, info: 1, debug: 2 };
 
@@ -106,7 +111,7 @@ export const buildParams = async (
 };
 
 export type HandlerRuntime = {
-  commonArgs(): Promise<Record<string, unknown>>;
+  commonArgs(cookieValue?: string): Promise<Record<string, unknown>>;
   logExecution(startTime: number, input: unknown, output: unknown): void;
   logError(startTime: number, input: unknown, error: unknown): void;
   patchConsole(): void;
@@ -128,7 +133,7 @@ const staticFiles = {
 };
 
 export const createHandlerRuntime = (
-  handler: { setup?: (...args: any[]) => any; deps?: DepsInput; config?: Record<string, unknown>; static?: string[] },
+  handler: { setup?: (...args: any[]) => any; deps?: DepsInput; config?: Record<string, unknown>; static?: string[]; auth?: CookieAuth },
   handlerType: "http" | "table" | "app" | "fifo-queue" | "bucket" | "api",
   logLevel: LogLevel = "info",
   extraSetupArgs?: () => Record<string, unknown>
@@ -139,6 +144,7 @@ export const createHandlerRuntime = (
   let ctx: unknown = null;
   let resolvedDeps: Record<string, unknown> | undefined;
   let resolvedParams: Record<string, unknown> | undefined | null = null;
+  let resolvedAuthRuntime: AuthRuntime | undefined | null = null;
 
   const getDeps = () => (resolvedDeps ??= buildDeps(handler.deps));
 
@@ -146,6 +152,18 @@ export const createHandlerRuntime = (
     if (resolvedParams !== null) return resolvedParams;
     resolvedParams = await buildParams(handler.config);
     return resolvedParams;
+  };
+
+  const getAuthRuntime = async () => {
+    if (resolvedAuthRuntime !== null) return resolvedAuthRuntime;
+    const ssmPath = process.env[ENV_AUTH_SECRET];
+    if (!ssmPath || !handler.auth) { resolvedAuthRuntime = undefined; return undefined; }
+    const values = await getParameters([ssmPath]);
+    const secret = values.get(ssmPath);
+    if (!secret) throw new Error(`Auth secret not found at ${ssmPath}`);
+    const defaultExpires = handler.auth.expiresIn ? toSeconds(handler.auth.expiresIn) : 604800; // 7 days
+    resolvedAuthRuntime = createAuthRuntime(secret, defaultExpires);
+    return resolvedAuthRuntime;
   };
 
   const getSetup = async () => {
@@ -163,7 +181,7 @@ export const createHandlerRuntime = (
     return ctx;
   };
 
-  const commonArgs = async (): Promise<Record<string, unknown>> => {
+  const commonArgs = async (cookieValue?: string): Promise<Record<string, unknown>> => {
     const args: Record<string, unknown> = {};
     if (handler.setup) args.ctx = await getSetup();
     const deps = getDeps();
@@ -171,6 +189,8 @@ export const createHandlerRuntime = (
     const params = await getParams();
     if (params) args.config = params;
     if (handler.static) args.files = staticFiles;
+    const authRuntime = await getAuthRuntime();
+    if (authRuntime) args.auth = authRuntime.forRequest(cookieValue);
     return args;
   };
 

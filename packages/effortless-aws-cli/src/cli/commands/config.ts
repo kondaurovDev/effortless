@@ -7,7 +7,7 @@ import { Aws } from "../../aws";
 import { ssm } from "~/aws/clients";
 import { findHandlerFiles, discoverHandlers } from "~/build/bundle";
 import { resolveStage } from "~/aws";
-import { collectRequiredParams, checkMissingParams, type RequiredParam } from "~/deploy/resolve-config";
+import { collectRequiredSecrets, checkMissingSecrets, type RequiredSecret } from "~/deploy/resolve-config";
 import { projectOption, stageOption, regionOption, verboseOption, getPatternsFromConfig } from "~/cli/config";
 import { ProjectConfig } from "~/cli/project-config";
 import { c } from "~/cli/colors";
@@ -39,7 +39,7 @@ const loadRequiredParams = (
     const finalStage = config?.stage ?? stage;
     const finalRegion = config?.region ?? region;
 
-    const params = collectRequiredParams(handlers, project, finalStage);
+    const params = collectRequiredSecrets(handlers, project, finalStage);
     return { params, project, stage: finalStage, region: finalRegion };
   });
 
@@ -58,7 +58,7 @@ const listCommand = Command.make(
         return;
       }
 
-      const { existing, missing } = yield* checkMissingParams(params).pipe(
+      const { existing, missing } = yield* checkMissingSecrets(params).pipe(
         Effect.provide(Aws.makeClients({ ssm: { region: ctx.region } }))
       );
 
@@ -144,7 +144,7 @@ const configRootCommand = Command.make(
         return;
       }
 
-      const { missing } = yield* checkMissingParams(params).pipe(
+      const { missing } = yield* checkMissingSecrets(params).pipe(
         Effect.provide(Aws.makeClients({ ssm: { region: ctx.region } }))
       );
 

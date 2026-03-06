@@ -22,7 +22,7 @@ describe("params extraction", () => {
       const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
-      expect(configs[0]!.paramEntries).toEqual([
+      expect(configs[0]!.secretEntries).toEqual([
         { propName: "dbUrl", ssmKey: "database-url" }
       ]);
     });
@@ -44,7 +44,7 @@ describe("params extraction", () => {
       const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
-      expect(configs[0]!.paramEntries).toEqual([
+      expect(configs[0]!.secretEntries).toEqual([
         { propName: "dbUrl", ssmKey: "database-url" },
         { propName: "apiKey", ssmKey: "stripe-api-key" }
       ]);
@@ -67,12 +67,12 @@ describe("params extraction", () => {
       const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
-      expect(configs[0]!.paramEntries).toEqual([
+      expect(configs[0]!.secretEntries).toEqual([
         { propName: "appConfig", ssmKey: "app-config" }
       ]);
     });
 
-    it("should return empty paramEntries when no params property", () => {
+    it("should return empty secretEntries when no params property", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
@@ -85,7 +85,7 @@ describe("params extraction", () => {
       const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
-      expect(configs[0]!.paramEntries).toEqual([]);
+      expect(configs[0]!.secretEntries).toEqual([]);
     });
 
     it("should extract params from default export", () => {
@@ -105,7 +105,7 @@ describe("params extraction", () => {
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.exportName).toBe("default");
-      expect(configs[0]!.paramEntries).toEqual([
+      expect(configs[0]!.secretEntries).toEqual([
         { propName: "dbUrl", ssmKey: "database-url" }
       ]);
     });
@@ -131,6 +131,132 @@ describe("params extraction", () => {
 
   });
 
+  describe("secret() extraction", () => {
+
+    it("should derive SSM key from property name (camelCase → kebab-case)", () => {
+      const source = `
+        import { defineApi, secret } from "effortless-aws";
+
+        export const api = defineApi({
+          basePath: "/orders",
+          config: {
+            authSecret: secret(),
+            dbUrl: secret(),
+          },
+          get: { "/": async ({ req, config }) => ({ status: 200 }) }
+        });
+      `;
+
+      const configs = extractApiConfigs(source);
+
+      expect(configs[0]!.secretEntries).toEqual([
+        { propName: "authSecret", ssmKey: "auth-secret" },
+        { propName: "dbUrl", ssmKey: "db-url" },
+      ]);
+    });
+
+    it("should use explicit key when provided", () => {
+      const source = `
+        import { defineApi, secret } from "effortless-aws";
+
+        export const api = defineApi({
+          basePath: "/orders",
+          config: {
+            dbUrl: secret({ key: "my-custom-key" }),
+          },
+          get: { "/": async ({ req }) => ({ status: 200 }) }
+        });
+      `;
+
+      const configs = extractApiConfigs(source);
+
+      expect(configs[0]!.secretEntries).toEqual([
+        { propName: "dbUrl", ssmKey: "my-custom-key" },
+      ]);
+    });
+
+    it("should extract generate spec for generateHex", () => {
+      const source = `
+        import { defineApi, secret, generateHex } from "effortless-aws";
+
+        export const api = defineApi({
+          basePath: "/orders",
+          config: {
+            authSecret: secret({ generate: generateHex(32) }),
+          },
+          get: { "/": async ({ req }) => ({ status: 200 }) }
+        });
+      `;
+
+      const configs = extractApiConfigs(source);
+
+      expect(configs[0]!.secretEntries).toEqual([
+        { propName: "authSecret", ssmKey: "auth-secret", generate: { type: "hex", bytes: 32 } },
+      ]);
+    });
+
+    it("should extract generate spec for generateBase64", () => {
+      const source = `
+        import { defineApi, secret, generateBase64 } from "effortless-aws";
+
+        export const api = defineApi({
+          basePath: "/orders",
+          config: {
+            token: secret({ generate: generateBase64(16) }),
+          },
+          get: { "/": async ({ req }) => ({ status: 200 }) }
+        });
+      `;
+
+      const configs = extractApiConfigs(source);
+
+      expect(configs[0]!.secretEntries).toEqual([
+        { propName: "token", ssmKey: "token", generate: { type: "base64", bytes: 16 } },
+      ]);
+    });
+
+    it("should extract generate spec for generateUuid", () => {
+      const source = `
+        import { defineApi, secret, generateUuid } from "effortless-aws";
+
+        export const api = defineApi({
+          basePath: "/orders",
+          config: {
+            instanceId: secret({ generate: generateUuid() }),
+          },
+          get: { "/": async ({ req }) => ({ status: 200 }) }
+        });
+      `;
+
+      const configs = extractApiConfigs(source);
+
+      expect(configs[0]!.secretEntries).toEqual([
+        { propName: "instanceId", ssmKey: "instance-id", generate: { type: "uuid" } },
+      ]);
+    });
+
+    it("should support secret with key + generate together", () => {
+      const source = `
+        import { defineApi, secret, generateHex } from "effortless-aws";
+
+        export const api = defineApi({
+          basePath: "/orders",
+          config: {
+            hmacKey: secret({ key: "hmac-secret", generate: generateHex(64) }),
+          },
+          get: { "/": async ({ req }) => ({ status: 200 }) }
+        });
+      `;
+
+      const configs = extractApiConfigs(source);
+
+      expect(configs[0]!.secretEntries).toEqual([
+        { propName: "hmacKey", ssmKey: "hmac-secret", generate: { type: "hex", bytes: 64 } },
+      ]);
+    });
+
+  });
+
   describe("extractTableConfigs", () => {
 
     it("should extract param entries from table handler", () => {
@@ -149,12 +275,12 @@ describe("params extraction", () => {
       const configs = extractTableConfigs(source);
 
       expect(configs).toHaveLength(1);
-      expect(configs[0]!.paramEntries).toEqual([
+      expect(configs[0]!.secretEntries).toEqual([
         { propName: "webhookUrl", ssmKey: "webhook-url" }
       ]);
     });
 
-    it("should return empty paramEntries for table without params", () => {
+    it("should return empty secretEntries for table without params", () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
@@ -167,7 +293,7 @@ describe("params extraction", () => {
       const configs = extractTableConfigs(source);
 
       expect(configs).toHaveLength(1);
-      expect(configs[0]!.paramEntries).toEqual([]);
+      expect(configs[0]!.secretEntries).toEqual([]);
     });
 
     it("should not leak params into table static config", () => {

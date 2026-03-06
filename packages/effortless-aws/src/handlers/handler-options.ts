@@ -74,69 +74,142 @@ export type LambdaWithPermissions = LambdaConfig & {
   permissions?: Permission[];
 };
 
-// ============ Params ============
+// ============ Secrets (SSM Parameters) ============
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type AnyParamRef = ParamRef<any> | string;
+export type AnySecretRef = SecretRef<any>;
 
 /**
- * Reference to an SSM Parameter Store parameter.
+ * Reference to an SSM Parameter Store secret.
  *
  * @typeParam T - The resolved type after optional transform (default: string)
  */
-export type ParamRef<T = string> = {
-  readonly __brand: "effortless-param";
-  readonly key: string;
+export type SecretRef<T = string> = {
+  readonly __brand: "effortless-secret";
+  readonly key?: string;
+  readonly generate?: () => string;
   readonly transform?: (raw: string) => T;
 };
 
 /**
  * Maps a config declaration to resolved value types.
- * Plain strings resolve to `string`, `ParamRef<T>` resolves to `T`.
+ * `SecretRef<T>` resolves to `T`.
  *
- * @typeParam P - Record of config keys to string or ParamRef instances
+ * @typeParam P - Record of config keys to SecretRef instances
  */
 export type ResolveConfig<P> = {
-  [K in keyof P]: P[K] extends ParamRef<infer T> ? T : string;
+  [K in keyof P]: P[K] extends SecretRef<infer T> ? T : string;
+};
+
+/** Options for `secret()` without a transform. */
+export type SecretOptions = {
+  /** Custom SSM key (default: derived from config property name in kebab-case) */
+  key?: string;
+  /** Generator function called at deploy time if the SSM parameter doesn't exist yet */
+  generate?: () => string;
+};
+
+/** Options for `secret()` with a transform. */
+export type SecretOptionsWithTransform<T> = SecretOptions & {
+  /** Transform the raw SSM string value into a typed value */
+  transform: (raw: string) => T;
 };
 
 /**
- * Declare an SSM Parameter Store parameter.
+ * Declare an SSM Parameter Store secret.
  *
- * The key is combined with project and stage at deploy time to form the full
- * SSM path: `/${project}/${stage}/${key}`.
+ * The SSM key is derived from the config property name (camelCase → kebab-case)
+ * unless overridden with `key`. The full SSM path is `/${project}/${stage}/${key}`.
  *
- * @param key - Parameter key (e.g., "database-url")
- * @param transform - Optional function to transform the raw string value
- * @returns A ParamRef used by the deployment and runtime systems
+ * @param options - Optional configuration (key override, generator, transform)
+ * @returns A SecretRef used by the deployment and runtime systems
  *
- * @example Simple string parameter
+ * @example Simple secret
  * ```typescript
  * config: {
- *   dbUrl: param("database-url"),
+ *   dbUrl: secret(),
+ *   // → SSM path: /${project}/${stage}/db-url
  * }
  * ```
  *
- * @example With transform (e.g., TOML parsing)
+ * @example Auto-generated secret
  * ```typescript
- * import TOML from "smol-toml";
- *
  * config: {
- *   appConfig: param("app-config", TOML.parse),
+ *   authSecret: secret({ generate: generateHex(64) }),
+ *   // → auto-creates SSM param if missing
+ * }
+ * ```
+ *
+ * @example With transform
+ * ```typescript
+ * config: {
+ *   appConfig: secret({ transform: TOML.parse }),
  * }
  * ```
  */
-export function param(key: string): ParamRef<string>;
-export function param<T>(key: string, transform: (raw: string) => T): ParamRef<T>;
+export function secret(): SecretRef<string>;
+export function secret(options: SecretOptions): SecretRef<string>;
+export function secret<T>(options: SecretOptionsWithTransform<T>): SecretRef<T>;
+export function secret<T = string>(
+  options?: SecretOptions | SecretOptionsWithTransform<T>
+): SecretRef<T> {
+  return {
+    __brand: "effortless-secret",
+    ...(options?.key ? { key: options.key } : {}),
+    ...(options?.generate ? { generate: options.generate } : {}),
+    ...("transform" in (options ?? {}) ? { transform: (options as SecretOptionsWithTransform<T>).transform } : {}),
+  } as SecretRef<T>;
+}
+
+// ============ Secret generators ============
+
+/**
+ * Returns a generator that produces a random hex string.
+ * @param bytes - Number of random bytes (output will be 2x this length in hex chars)
+ */
+export const generateHex = (bytes: number) => (): string => {
+  const crypto = require("crypto") as typeof import("crypto");
+  return crypto.randomBytes(bytes).toString("hex");
+};
+
+/**
+ * Returns a generator that produces a random base64url string.
+ * @param bytes - Number of random bytes
+ */
+export const generateBase64 = (bytes: number) => (): string => {
+  const crypto = require("crypto") as typeof import("crypto");
+  return crypto.randomBytes(bytes).toString("base64url");
+};
+
+/**
+ * Returns a generator that produces a random UUID v4.
+ */
+export const generateUuid = () => (): string => {
+  const crypto = require("crypto") as typeof import("crypto");
+  return crypto.randomUUID();
+};
+
+// ============ Backwards compatibility ============
+
+/** @deprecated Use `SecretRef` instead */
+export type ParamRef<T = string> = SecretRef<T>;
+/** @deprecated Use `AnySecretRef` instead */
+export type AnyParamRef = AnySecretRef;
+
+/**
+ * @deprecated Use `secret()` instead. `param("key")` is equivalent to `secret({ key: "key" })`.
+ */
+export function param(key: string): SecretRef<string>;
+export function param<T>(key: string, transform: (raw: string) => T): SecretRef<T>;
 export function param<T = string>(
   key: string,
   transform?: (raw: string) => T
-): ParamRef<T> {
+): SecretRef<T> {
   return {
-    __brand: "effortless-param",
+    __brand: "effortless-secret",
     key,
     ...(transform ? { transform } : {}),
-  } as ParamRef<T>;
+  } as SecretRef<T>;
 }
 
 // ============ Single-table types ============

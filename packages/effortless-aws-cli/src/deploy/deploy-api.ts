@@ -35,7 +35,7 @@ export const deployApiFunction = ({ input, fn, layerArn, external, depsEnv, deps
     const { exportName, config } = fn;
     const handlerName = exportName;
 
-    const { functionArn, status } = yield* deployCoreLambda({
+    const { functionArn, status, bundleSize } = yield* deployCoreLambda({
       input,
       exportName,
       handlerName,
@@ -50,7 +50,7 @@ export const deployApiFunction = ({ input, fn, layerArn, external, depsEnv, deps
       ...(staticGlobs && staticGlobs.length > 0 ? { staticGlobs } : {})
     });
 
-    return { exportName, functionArn, status, config, handlerName };
+    return { exportName, functionArn, status, bundleSize, config, handlerName };
   });
 
 export const deploy = (input: DeployInput) =>
@@ -78,7 +78,8 @@ export const deploy = (input: DeployInput) =>
       project: input.project,
       stage: tagCtx.stage,
       region: input.region,
-      packageDir: input.packageDir ?? input.projectDir
+      packageDir: input.packageDir ?? input.projectDir,
+      extraNodeModules: input.extraNodeModules
     });
 
     const { functionArn } = yield* deployApiFunction({

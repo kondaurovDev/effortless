@@ -18,6 +18,7 @@ export type DeployBucketResult = {
   exportName: string;
   functionArn?: string;
   status: import("~/aws/lambda").LambdaStatus | "resource-only";
+  bundleSize?: number;
   bucketName: string;
   bucketArn: string;
 };
@@ -70,7 +71,7 @@ export const deployBucketFunction = ({ input, fn, layerArn, external, depsEnv, d
     const selfEnv: Record<string, string> = { EFF_DEP_SELF: `bucket:${bucketName}`, ...depsEnv };
 
     // Deploy Lambda
-    const { functionArn, status } = yield* deployCoreLambda({
+    const { functionArn, status, bundleSize } = yield* deployCoreLambda({
       input,
       exportName,
       handlerName,
@@ -104,6 +105,7 @@ export const deployBucketFunction = ({ input, fn, layerArn, external, depsEnv, d
       exportName,
       functionArn,
       status,
+      bundleSize,
       bucketName,
       bucketArn,
     };

@@ -101,7 +101,7 @@ describe("extractFifoQueueConfigs", () => {
       });
     `;
     const configs = extractFifoQueueConfigs(source);
-    expect(configs[0]!.paramEntries).toEqual([{ propName: "apiKey", ssmKey: "api-key" }]);
+    expect(configs[0]!.secretEntries).toEqual([{ propName: "apiKey", ssmKey: "api-key" }]);
   });
 
   it("extracts static globs", () => {

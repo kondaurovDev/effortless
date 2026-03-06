@@ -64,6 +64,7 @@ export const deployCommand = Command.make(
               region: finalRegion,
               noSites,
               verbose,
+              extraNodeModules: projectDir !== cwd ? [path.join(projectDir, "node_modules")] : undefined,
             });
 
             const total = results.tableResults.length + results.appResults.length + results.staticSiteResults.length + results.apiResults.length;
@@ -169,6 +170,7 @@ export const deployCommand = Command.make(
                 stage: finalStage,
                 region: finalRegion,
                 exportName: foundExport,
+                extraNodeModules: projectDir !== cwd ? [path.join(projectDir, "node_modules")] : undefined,
               };
 
               if (handlerType === "table") {

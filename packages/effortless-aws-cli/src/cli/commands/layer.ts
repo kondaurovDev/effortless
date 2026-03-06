@@ -22,17 +22,18 @@ export const layerCommand = Command.make(
   { build: buildOption, output: outputOption, verbose: verboseOption },
   ({ build, output, verbose }) =>
     Effect.gen(function* () {
-      const { config, cwd } = yield* ProjectConfig;
+      const { config, cwd, projectDir } = yield* ProjectConfig;
+      const extraNodeModules = projectDir !== cwd ? [path.join(projectDir, "node_modules")] : undefined;
 
       if (build) {
-        yield* buildLayer(cwd, output, verbose);
+        yield* buildLayer(cwd, output, verbose, extraNodeModules);
       } else {
-        yield* showLayerInfo(cwd, config?.name, verbose);
+        yield* showLayerInfo(cwd, config?.name, verbose, extraNodeModules);
       }
     }).pipe(Effect.provide(ProjectConfig.Live))
 ).pipe(Command.withDescription("Inspect or locally build the shared Lambda dependency layer from package.json"));
 
-const showLayerInfo = (projectDir: string, projectName: string | undefined, verbose: boolean) =>
+const showLayerInfo = (projectDir: string, projectName: string | undefined, verbose: boolean, extraNodeModules?: string[]) =>
   Effect.gen(function* () {
     yield* Console.log(`\n${c.bold("=== Layer Packages Preview ===")}\n`);
 
@@ -59,7 +60,7 @@ const showLayerInfo = (projectDir: string, projectName: string | undefined, verb
       yield* Console.log(`  ${dep}`);
     }
 
-    const hash = yield* computeLockfileHash(projectDir).pipe(
+    const hash = yield* computeLockfileHash(projectDir, extraNodeModules).pipe(
       Effect.catchAll(() => Effect.succeed(null))
     );
 
@@ -69,7 +70,7 @@ const showLayerInfo = (projectDir: string, projectName: string | undefined, verb
       yield* Console.log("\nNo lockfile found (package-lock.json, pnpm-lock.yaml, or yarn.lock)");
     }
 
-    const { packages: allPackages, warnings: layerWarnings } = yield* Effect.sync(() => collectLayerPackages(projectDir, prodDeps));
+    const { packages: allPackages, warnings: layerWarnings } = yield* Effect.sync(() => collectLayerPackages(projectDir, prodDeps, extraNodeModules));
 
     if (layerWarnings.length > 0) {
       yield* Console.log(c.yellow(`\nWarnings (${layerWarnings.length}):`));
@@ -100,7 +101,7 @@ const showLayerInfo = (projectDir: string, projectName: string | undefined, verb
     }
   });
 
-const buildLayer = (projectDir: string, output: string, verbose: boolean) =>
+const buildLayer = (projectDir: string, output: string, verbose: boolean, extraNodeModules?: string[]) =>
   Effect.gen(function* () {
     const outputDir = path.isAbsolute(output) ? output : path.resolve(projectDir, output);
     const layerDir = path.join(outputDir, "nodejs", "node_modules");
@@ -136,13 +137,13 @@ const buildLayer = (projectDir: string, output: string, verbose: boolean) =>
       yield* Console.log(`  ${dep}`);
     }
 
-    const hash = yield* computeLockfileHash(projectDir).pipe(
+    const hash = yield* computeLockfileHash(projectDir, extraNodeModules).pipe(
       Effect.catchAll(() => Effect.succeed("unknown"))
     );
 
     yield* Console.log(`\nLockfile hash: ${hash}`);
 
-    const { packages: allPackages, resolvedPaths, warnings: layerWarnings } = yield* Effect.sync(() => collectLayerPackages(projectDir, prodDeps));
+    const { packages: allPackages, resolvedPaths, warnings: layerWarnings } = yield* Effect.sync(() => collectLayerPackages(projectDir, prodDeps, extraNodeModules));
 
     if (layerWarnings.length > 0) {
       yield* Console.log(`\nWarnings (${layerWarnings.length}):`);

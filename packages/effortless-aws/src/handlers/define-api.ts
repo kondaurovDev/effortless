@@ -2,6 +2,10 @@ import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "./handle
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles, ResponseStream } from "./shared";
 import type { HttpRequest, HttpResponse } from "./shared";
+import type { CookieAuth, AuthHelpers } from "./auth";
+
+/** Extract session type T from CookieAuth<T> */
+type SessionOf<A> = A extends CookieAuth<infer T> ? T : undefined;
 
 /** GET route handler — no schema, no data */
 export type ApiGetHandlerFn<
@@ -9,7 +13,8 @@ export type ApiGetHandlerFn<
   D = undefined,
   P = undefined,
   S extends string[] | undefined = undefined,
-  ST extends boolean | undefined = undefined
+  ST extends boolean | undefined = undefined,
+  A extends CookieAuth<any> | undefined = undefined
 > =
   (args: { req: HttpRequest }
     & ([C] extends [undefined] ? {} : { ctx: C })
@@ -17,6 +22,7 @@ export type ApiGetHandlerFn<
     & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
     & ([S] extends [undefined] ? {} : { files: StaticFiles })
     & ([ST] extends [true] ? { stream: ResponseStream } : {})
+    & ([A] extends [undefined] ? {} : { auth: AuthHelpers<SessionOf<A>> })
   ) => Promise<HttpResponse | void> | HttpResponse | void;
 
 /** POST handler — with typed data from schema */
@@ -26,7 +32,8 @@ export type ApiPostHandlerFn<
   D = undefined,
   P = undefined,
   S extends string[] | undefined = undefined,
-  ST extends boolean | undefined = undefined
+  ST extends boolean | undefined = undefined,
+  A extends CookieAuth<any> | undefined = undefined
 > =
   (args: { req: HttpRequest }
     & ([T] extends [undefined] ? {} : { data: T })
@@ -35,6 +42,7 @@ export type ApiPostHandlerFn<
     & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
     & ([S] extends [undefined] ? {} : { files: StaticFiles })
     & ([ST] extends [true] ? { stream: ResponseStream } : {})
+    & ([A] extends [undefined] ? {} : { auth: AuthHelpers<SessionOf<A>> })
   ) => Promise<HttpResponse | void> | HttpResponse | void;
 
 /** Setup factory — receives deps/config/files when declared */
@@ -67,7 +75,8 @@ export type DefineApiOptions<
   D extends Record<string, AnyDepHandler> | undefined = undefined,
   P extends Record<string, AnyParamRef> | undefined = undefined,
   S extends string[] | undefined = undefined,
-  ST extends boolean | undefined = undefined
+  ST extends boolean | undefined = undefined,
+  A extends CookieAuth<any> | undefined = undefined
 > = {
   /** Lambda function settings (memory, timeout, permissions, etc.) */
   lambda?: LambdaWithPermissions;
@@ -75,6 +84,8 @@ export type DefineApiOptions<
   basePath: string;
   /** Enable response streaming. When true, routes receive a `stream` arg for SSE. Routes can still return HttpResponse normally. */
   stream?: ST;
+  /** Cookie-based authentication. Injects `auth` helpers (grant/revoke) into handler args. */
+  auth?: A;
   /**
    * Factory function to initialize shared state.
    * Called once on cold start, result is cached and reused across invocations.
@@ -90,7 +101,7 @@ export type DefineApiOptions<
   onError?: (error: unknown, req: HttpRequest) => HttpResponse;
 
   /** GET routes — query handlers keyed by relative path (e.g., "/users/{id}") */
-  get?: Record<string, ApiGetHandlerFn<C, D, P, S, ST>>;
+  get?: Record<string, ApiGetHandlerFn<C, D, P, S, ST, A>>;
 
   /**
    * Schema for POST body validation. Use with discriminated unions:
@@ -101,7 +112,7 @@ export type DefineApiOptions<
    */
   schema?: (input: unknown) => T;
   /** POST handler — single entry point for commands */
-  post?: ApiPostHandlerFn<T, C, D, P, S, ST>;
+  post?: ApiPostHandlerFn<T, C, D, P, S, ST, A>;
 };
 
 /** Internal handler object created by defineApi */
@@ -117,6 +128,7 @@ export type ApiHandler<
   readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
   readonly config?: Record<string, unknown>;
   readonly static?: string[];
+  readonly auth?: CookieAuth;
   readonly get?: Record<string, (...args: any[]) => any>;
   readonly post?: (...args: any[]) => any;
 };
@@ -161,11 +173,12 @@ export const defineApi = <
   D extends Record<string, AnyDepHandler> | undefined = undefined,
   P extends Record<string, AnyParamRef> | undefined = undefined,
   S extends string[] | undefined = undefined,
-  ST extends boolean | undefined = undefined
+  ST extends boolean | undefined = undefined,
+  A extends CookieAuth<any> | undefined = undefined
 >(
-  options: DefineApiOptions<T, C, D, P, S, ST>
+  options: DefineApiOptions<T, C, D, P, S, ST, A>
 ): ApiHandler<T, C> => {
-  const { get, post, schema, onError, setup, deps, config, static: staticFiles, ...__spec } = options;
+  const { get, post, schema, onError, setup, deps, config, auth: authConfig, static: staticFiles, ...__spec } = options;
   return {
     __brand: "effortless-api",
     __spec,
@@ -177,5 +190,6 @@ export const defineApi = <
     ...(deps ? { deps } : {}),
     ...(config ? { config } : {}),
     ...(staticFiles ? { static: staticFiles } : {}),
+    ...(authConfig ? { auth: authConfig } : {}),
   } as ApiHandler<T, C>;
 };

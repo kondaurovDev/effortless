@@ -273,8 +273,8 @@ describe("param type inference", () => {
 
   it("default → string", () => {
     const ref = param("key");
-    expectTypeOf(ref.__brand).toEqualTypeOf<"effortless-param">();
-    expectTypeOf(ref.key).toEqualTypeOf<string>();
+    expectTypeOf(ref.__brand).toEqualTypeOf<"effortless-secret">();
+    expectTypeOf(ref.key).toEqualTypeOf<string | undefined>();
   });
 
   it("with transform → inferred from transform return", () => {
@@ -284,7 +284,7 @@ describe("param type inference", () => {
 
   it("custom transform → inferred return type", () => {
     const ref = param("config", (raw) => JSON.parse(raw) as { port: number });
-    expectTypeOf(ref).toMatchTypeOf<{ __brand: "effortless-param" }>();
+    expectTypeOf(ref).toMatchTypeOf<{ __brand: "effortless-secret" }>();
   });
 
 });

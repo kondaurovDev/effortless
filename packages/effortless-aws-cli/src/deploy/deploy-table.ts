@@ -55,7 +55,7 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
     // Merge EFF_DEP_SELF (own table name) into deps env vars
     const selfEnv: Record<string, string> = { EFF_DEP_SELF: `table:${tableName}`, ...depsEnv };
 
-    const { functionArn, status } = yield* deployCoreLambda({
+    const { functionArn, status, bundleSize } = yield* deployCoreLambda({
       input,
       exportName,
       handlerName,
@@ -86,6 +86,7 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
       exportName,
       functionArn,
       status,
+      bundleSize,
       tableArn,
       streamArn
     };
@@ -109,7 +110,8 @@ export const deployTable = (input: DeployInput) =>
       project: input.project,
       stage: resolveStage(input.stage),
       region: input.region,
-      packageDir: input.packageDir ?? input.projectDir
+      packageDir: input.packageDir ?? input.projectDir,
+      extraNodeModules: input.extraNodeModules
     });
 
     const result = yield* deployTableFunction({
@@ -146,7 +148,8 @@ export const deployAllTables = (input: DeployInput) =>
       project: input.project,
       stage: resolveStage(input.stage),
       region: input.region,
-      packageDir: input.packageDir ?? input.projectDir
+      packageDir: input.packageDir ?? input.projectDir,
+      extraNodeModules: input.extraNodeModules
     });
 
     const results = yield* Effect.forEach(

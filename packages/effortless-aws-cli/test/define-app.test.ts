@@ -140,7 +140,7 @@ describe("defineApp extraction", () => {
     const configs = extractAppConfigs(source);
 
     expect(configs[0]!.depsKeys).toEqual([]);
-    expect(configs[0]!.paramEntries).toEqual([]);
+    expect(configs[0]!.secretEntries).toEqual([]);
     expect(configs[0]!.staticGlobs).toEqual([]);
   });
 

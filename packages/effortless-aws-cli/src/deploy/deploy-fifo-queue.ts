@@ -17,6 +17,7 @@ export type DeployFifoQueueResult = {
   exportName: string;
   functionArn: string;
   status: import("~/aws/lambda").LambdaStatus;
+  bundleSize?: number;
   queueUrl: string;
   queueArn: string;
 };
@@ -66,7 +67,7 @@ export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv
     };
 
     // Deploy Lambda
-    const { functionArn, status } = yield* deployCoreLambda({
+    const { functionArn, status, bundleSize } = yield* deployCoreLambda({
       input,
       exportName,
       handlerName,
@@ -97,6 +98,7 @@ export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv
       exportName,
       functionArn,
       status,
+      bundleSize,
       queueUrl,
       queueArn,
     };

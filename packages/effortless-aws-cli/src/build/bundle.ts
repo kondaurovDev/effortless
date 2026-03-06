@@ -2,11 +2,15 @@ import { Effect } from "effect";
 import * as esbuild from "esbuild";
 import * as fsSync from "fs";
 import * as path from "path";
+import { builtinModules } from "module";
 import { createRequire } from "module";
 import archiver from "archiver";
 import { globSync } from "glob";
-import { generateEntryPoint, generateMiddlewareEntryPoint, extractHandlerConfigs, type HandlerType, type ExtractedConfig } from "./handler-registry";
+import { generateEntryPoint, generateMiddlewareEntryPoint, extractHandlerConfigs, type HandlerType, type ExtractedConfig, type AuthConfig } from "./handler-registry";
 import type { TableConfig, AppConfig, StaticSiteConfig, FifoQueueConfig, BucketConfig, MailerConfig, ApiConfig } from "effortless-aws";
+
+/** Must match AUTH_COOKIE_NAME in effortless-aws/src/handlers/auth.ts */
+const AUTH_COOKIE_NAME = "__eff_session";
 
 export type BundleInput = {
   projectDir: string;
@@ -54,6 +58,12 @@ export const extractApiConfigs = (source: string): ExtractedApiFunction[] =>
 const _require = createRequire(import.meta.url);
 const runtimeDir = path.join(path.dirname(_require.resolve("effortless-aws/package.json")), "dist/runtime");
 
+export type BundleResult = {
+  code: string;
+  /** Top modules by size (path → bytes), only when metafile is enabled */
+  topModules?: { path: string; bytes: number }[];
+};
+
 export const bundle = (input: BundleInput & { exportName?: string; external?: string[]; type?: HandlerType }) =>
   Effect.gen(function* () {
     const exportName = input.exportName ?? "default";
@@ -65,9 +75,10 @@ export const bundle = (input: BundleInput & { exportName?: string; external?: st
 
     const entryPoint = generateEntryPoint(sourcePath, exportName, type, runtimeDir);
 
-    // AWS SDK v3 is available in the Lambda Node.js runtime — never bundle it
+    // AWS SDK v3 + Node.js built-ins are available in the Lambda runtime — never bundle them
     const awsExternals = ["@aws-sdk/*", "@smithy/*"];
-    const allExternals = [...new Set([...awsExternals, ...externals])];
+    const nodeExternals = builtinModules.flatMap(m => [m, `node:${m}`]);
+    const allExternals = [...new Set([...awsExternals, ...nodeExternals, ...externals])];
 
     const result = yield* Effect.tryPromise({
       try: () => esbuild.build({
@@ -83,7 +94,8 @@ export const bundle = (input: BundleInput & { exportName?: string; external?: st
         minify: false,
         sourcemap: false,
         format: input.format ?? "esm",
-        external: allExternals
+        external: allExternals,
+        metafile: true,
       }),
       catch: (error) => new Error(`esbuild failed: ${error}`)
     });
@@ -92,8 +104,46 @@ export const bundle = (input: BundleInput & { exportName?: string; external?: st
     if (!output) {
       throw new Error("esbuild produced no output");
     }
-    return output.text;
+
+    const bundleResult: BundleResult = { code: output.text };
+
+    if (result.metafile) {
+      bundleResult.topModules = analyzeMetafile(result.metafile);
+    }
+
+    return bundleResult;
   });
+
+/**
+ * Extract top modules by size from esbuild metafile.
+ * Groups by top-level package name (e.g. node_modules/effect/...).
+ */
+const analyzeMetafile = (metafile: esbuild.Metafile): { path: string; bytes: number }[] => {
+  const packageSizes = new Map<string, number>();
+
+  for (const [filePath, info] of Object.entries(metafile.inputs)) {
+    // Group by package: node_modules/.pnpm/pkg@ver/node_modules/pkg/... → pkg
+    const nodeModIdx = filePath.lastIndexOf("node_modules/");
+    let key: string;
+    if (nodeModIdx !== -1) {
+      const afterNm = filePath.slice(nodeModIdx + "node_modules/".length);
+      // Handle scoped packages: @scope/name/...
+      if (afterNm.startsWith("@")) {
+        const parts = afterNm.split("/");
+        key = `${parts[0]}/${parts[1]}`;
+      } else {
+        key = afterNm.split("/")[0]!;
+      }
+    } else {
+      key = "<project>";
+    }
+    packageSizes.set(key, (packageSizes.get(key) ?? 0) + info.bytes);
+  }
+
+  return Array.from(packageSizes.entries())
+    .map(([p, bytes]) => ({ path: p, bytes }))
+    .sort((a, b) => b.bytes - a.bytes);
+};
 
 /**
  * Bundle middleware as a standalone Lambda@Edge function.
@@ -135,6 +185,116 @@ export const bundleMiddleware = (input: { projectDir: string; file: string }) =>
     if (!output) {
       throw new Error("esbuild produced no output for middleware");
     }
+    return output.text;
+  });
+
+/**
+ * Generate and bundle a self-contained auth middleware for Lambda@Edge.
+ * The HMAC secret is injected at build time via esbuild `define`.
+ * No external imports needed (uses Node.js built-in crypto).
+ */
+export const bundleAuthMiddleware = (input: { authConfig: AuthConfig; secret: string }) =>
+  Effect.gen(function* () {
+    const { authConfig, secret } = input;
+    const loginPath = authConfig.loginPath;
+    const publicPatterns = authConfig.public ?? [];
+
+    const entryPoint = `
+import { createHmac } from "crypto";
+
+const SECRET = ${JSON.stringify(secret)};
+const LOGIN_PATH = ${JSON.stringify(loginPath)};
+const PUBLIC = ${JSON.stringify(publicPatterns)};
+const COOKIE = ${JSON.stringify(AUTH_COOKIE_NAME)};
+
+const isPublic = (uri) => {
+  for (const p of PUBLIC) {
+    if (p.endsWith("/*")) {
+      if (uri.startsWith(p.slice(0, -1))) return true;
+    } else if (p.endsWith("*")) {
+      if (uri.startsWith(p.slice(0, -1))) return true;
+    } else {
+      if (uri === p) return true;
+    }
+  }
+  return false;
+};
+
+const verify = (cookie) => {
+  if (!cookie) return false;
+  const dot = cookie.indexOf(".");
+  if (dot === -1) return false;
+  const payload = cookie.slice(0, dot);
+  const sig = cookie.slice(dot + 1);
+  const expected = createHmac("sha256", SECRET).update(payload).digest("base64url");
+  if (sig !== expected) return false;
+  try {
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf-8"));
+    return data.exp > Math.floor(Date.now() / 1000);
+  } catch { return false; }
+};
+
+const parseCookies = (headers) => {
+  const cookies = {};
+  const cookieHeaders = headers.cookie;
+  if (!cookieHeaders) return cookies;
+  for (const { value } of cookieHeaders) {
+    for (const pair of value.split(";")) {
+      const eq = pair.indexOf("=");
+      if (eq === -1) continue;
+      const name = pair.slice(0, eq).trim();
+      const val = pair.slice(eq + 1).trim();
+      if (name) cookies[name] = val;
+    }
+  }
+  return cookies;
+};
+
+const rewrite = (uri) => {
+  if (uri.endsWith("/")) return uri + "index.html";
+  if (!uri.includes(".")) return uri + "/index.html";
+  return uri;
+};
+
+export const handler = async (event) => {
+  const req = event.Records[0].cf.request;
+
+  if (isPublic(req.uri)) {
+    req.uri = rewrite(req.uri);
+    return req;
+  }
+
+  const cookies = parseCookies(req.headers);
+  if (verify(cookies[COOKIE])) {
+    req.uri = rewrite(req.uri);
+    return req;
+  }
+
+  return {
+    status: "302",
+    statusDescription: "Found",
+    headers: { location: [{ key: "Location", value: LOGIN_PATH }] },
+  };
+};
+`;
+
+    const result = yield* Effect.tryPromise({
+      try: () => esbuild.build({
+        stdin: { contents: entryPoint, loader: "js", resolveDir: process.cwd() },
+        bundle: true,
+        platform: "node",
+        target: "node22",
+        write: false,
+        minify: true,
+        sourcemap: false,
+        format: "esm",
+        external: ["crypto"],
+      }),
+      catch: (error) => new Error(`esbuild failed (auth middleware): ${error}`),
+    });
+
+    const output = result.outputFiles?.[0];
+    if (!output) throw new Error("esbuild produced no output for auth middleware");
     return output.text;
   });
 

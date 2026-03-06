@@ -66,6 +66,7 @@ export default defineConfig({
         {
           label: "Guides",
           items: [
+            { label: "Authentication", slug: "use-cases/authentication" },
             { label: "HTTP API", slug: "use-cases/http-api" },
             { label: "Database", slug: "use-cases/database" },
             { label: "Website", slug: "use-cases/web-app" },

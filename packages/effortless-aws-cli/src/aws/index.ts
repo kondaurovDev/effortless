@@ -1,5 +1,5 @@
 // Lambda
-export { ensureLambda, deleteLambda, publishVersion, ensureFunctionUrl, addFunctionUrlPublicAccess } from "./lambda";
+export { ensureLambda, deleteLambda, publishVersion, ensureEdgePermission, ensureFunctionUrl, addFunctionUrlPublicAccess } from "./lambda";
 export type { LambdaConfig, LambdaStatus } from "./lambda";
 
 // IAM

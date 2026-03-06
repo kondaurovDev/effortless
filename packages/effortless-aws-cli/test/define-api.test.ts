@@ -94,7 +94,7 @@ describe("defineApi", () => {
       const configs = extractApiConfigs(source);
 
       expect(configs[0]!.depsKeys).toEqual(["users"]);
-      expect(configs[0]!.paramEntries).toEqual([{ propName: "dbUrl", ssmKey: "database-url" }]);
+      expect(configs[0]!.secretEntries).toEqual([{ propName: "dbUrl", ssmKey: "database-url" }]);
     });
 
   });
@@ -323,6 +323,71 @@ describe("defineApi", () => {
 
       const res = await mod.handler(makeEvent("PUT", "/api/users"));
       expect(res.statusCode).toBe(404);
+    });
+
+  });
+
+  describe("auth extraction", () => {
+
+    it("should extract auth config from inline defineAuth() call", () => {
+      const source = `
+        import { defineApi, defineAuth } from "effortless-aws";
+
+        export const api = defineApi({
+          basePath: "/api",
+          auth: defineAuth({
+            loginPath: "/login",
+            public: ["/login", "/assets/*"],
+            expiresIn: "7d",
+          }),
+          post: {
+            "/login": async ({ auth }) => auth.grant(),
+          },
+        });
+      `;
+
+      const configs = extractApiConfigs(source);
+
+      expect(configs).toHaveLength(1);
+      expect(configs[0]!.authConfig).toEqual({
+        loginPath: "/login",
+        public: ["/login", "/assets/*"],
+        expiresIn: "7d",
+      });
+    });
+
+    it("should extract auth config from variable reference", () => {
+      const source = `
+        import { defineApi, defineAuth } from "effortless-aws";
+
+        const protect = defineAuth({ loginPath: "/login" });
+
+        export const api = defineApi({
+          basePath: "/api",
+          auth: protect,
+          get: { "/health": () => ({ status: 200, body: "ok" }) },
+        });
+      `;
+
+      const configs = extractApiConfigs(source);
+
+      expect(configs).toHaveLength(1);
+      expect(configs[0]!.authConfig).toEqual({ loginPath: "/login" });
+    });
+
+    it("should not have authConfig when no auth", () => {
+      const source = `
+        import { defineApi } from "effortless-aws";
+
+        export const api = defineApi({
+          basePath: "/api",
+          get: { "/health": () => ({ status: 200, body: "ok" }) },
+        });
+      `;
+
+      const configs = extractApiConfigs(source);
+
+      expect(configs[0]!.authConfig).toBeUndefined();
     });
 
   });
