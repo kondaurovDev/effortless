@@ -2,6 +2,9 @@
   "private": true,
   "scripts": {
     "build": "pnpm -r build",
+    "docs:build": "pnpm --dir docs build",
+    "docs:preview:cf": "pnpm docs:build && wrangler dev",
+    "docs:deploy": "pnpm docs:build && wrangler deploy",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r --filter '!@effortless-aws/integration' test",
     "test:integration": "pnpm --filter @effortless-aws/integration test",
@@ -11,6 +14,7 @@
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.2",
     "@changesets/cli": "^2.30.0",
-    "oxlint": "^1.60.0"
+    "oxlint": "^1.60.0",
+    "wrangler": "^4.90.1"
   }
 }

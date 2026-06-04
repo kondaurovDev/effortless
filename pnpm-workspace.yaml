@@ -8,6 +8,8 @@ allowBuilds:
   '@parcel/watcher': true
   esbuild: true
   msgpackr-extract: true
+  sharp: true
+  workerd: true
 
 catalog:
   '@aws-sdk/client-acm': ^3.993.0

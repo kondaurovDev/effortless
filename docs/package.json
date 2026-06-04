@@ -10,7 +10,6 @@
   "devDependencies": {
     "@astrojs/starlight": "^0.32.0",
     "astro": "^5.0.0",
-    "effortless-aws": "^0.38.0",
     "sharp": "^0.33.0",
     "typescript": "^5.9.0"
   }
